@@ -1,69 +1,175 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect } from 'react';
+import { LogOut } from 'lucide-react';
+import Sidebar from '@/components/Sidebar';
+import Editor from '@/components/Editor';
+import NewDocumentModal from '@/components/NewDocumentModal';
+import CommandPalette from '@/components/CommandPalette';
+import { getDefaultWorkspaceId } from '@/lib/workspace';
+import { supabase } from '@/lib/supabase';
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+  const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadUserWorkspace = async () => {
+      try {
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+        if (userError) {
+          throw userError;
+        }
+
+        if (!user) {
+          setWorkspaceError('Your session expired. Please sign in again.');
+          return;
+        }
+
+        if (!isMounted) return;
+
+        setUserId(user.id);
+        setUserEmail(user.email ?? null);
+
+        const id = await getDefaultWorkspaceId(user.id);
+        setWorkspaceId(id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load workspace';
+        setWorkspaceError(message);
+        console.error('Workspace error:', error);
+      } finally {
+        if (isMounted) {
+          setIsLoadingWorkspace(false);
+        }
+      }
+    };
+
+    loadUserWorkspace();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextUser = session?.user ?? null;
+      setUserId(nextUser?.id ?? null);
+      setUserEmail(nextUser?.email ?? null);
+
+      if (!nextUser) {
+        setWorkspaceId(null);
+        setWorkspaceError('Your session expired. Please sign in again.');
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleOpenModal = () => setIsModalOpen(true);
+  const handleCloseModal = () => setIsModalOpen(false);
+  const handleSelectDocument = (documentId: string) => setCurrentDocumentId(documentId);
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    window.location.href = '/login';
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  if (isLoadingWorkspace) {
+    return (
+      <div suppressHydrationWarning className="flex h-screen items-center justify-center bg-white dark:bg-black">
+        <div suppressHydrationWarning className="text-center">
+          <div suppressHydrationWarning className="mb-3 inline-block">
+            <div suppressHydrationWarning className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-600 dark:border-zinc-700 dark:border-t-indigo-500" />
+          </div>
+          <p suppressHydrationWarning className="text-sm text-zinc-600 dark:text-zinc-400">
+            Initializing your workspace...
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+      </div>
+    );
+  }
+
+  if (workspaceError || !workspaceId || !userId) {
+    return (
+      <div suppressHydrationWarning className="flex h-screen items-center justify-center bg-white p-4 dark:bg-black">
+        <div suppressHydrationWarning className="w-full max-w-xl rounded-xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <h1 suppressHydrationWarning className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+            Unable to load your workspace
+          </h1>
+          <p suppressHydrationWarning className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+            {workspaceError || 'Your request could not be completed right now.'}
+          </p>
+          <button
+            suppressHydrationWarning
+            onClick={() => window.location.href = '/login'}
+            className="mt-6 inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Back to login
+          </button>
         </div>
-      </main>
+      </div>
+    );
+  }
+
+  return (
+    <div suppressHydrationWarning className="flex h-screen bg-white dark:bg-black">
+      <Sidebar
+        onNewDocument={handleOpenModal}
+        onSelectDocument={handleSelectDocument}
+        currentDocumentId={currentDocumentId || undefined}
+        workspaceId={workspaceId || ''}
+        userId={userId}
+        userEmail={userEmail}
+        onSignOut={handleSignOut}
+      />
+
+      {currentDocumentId ? (
+        <Editor documentId={currentDocumentId} onSelectDocument={handleSelectDocument} />
+      ) : (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center">
+            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+              No document selected
+            </h1>
+            <p className="mt-2 text-sm text-zinc-500">
+              Click “New Page” to create your first document
+            </p>
+          </div>
+        </div>
+      )}
+
+      <NewDocumentModal
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
+        onDocumentCreated={handleSelectDocument}
+        workspaceId={workspaceId}
+        userId={userId}
+      />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onSelectDocument={handleSelectDocument}
+        workspaceId={workspaceId}
+      />
     </div>
   );
 }
