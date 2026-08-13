@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Zettel",
   description: "A simple note-taking app",
+  icons: {
+    icon: "/zettel-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -13,6 +13,8 @@ export default function Home() {
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [newDocumentParentId, setNewDocumentParentId] = useState<string | null>(null);
+  const [documentRefreshVersion, setDocumentRefreshVersion] = useState(0);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -72,8 +74,18 @@ export default function Home() {
     };
   }, []);
 
-  const handleOpenModal = () => setIsModalOpen(true);
-  const handleCloseModal = () => setIsModalOpen(false);
+  const handleOpenModal = (parentId?: string) => {
+    setNewDocumentParentId(parentId ?? null);
+    setIsModalOpen(true);
+  };
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setNewDocumentParentId(null);
+  };
+  const handleDocumentCreated = (documentId: string) => {
+    setCurrentDocumentId(documentId);
+    setDocumentRefreshVersion((prev) => prev + 1);
+  };
   const handleSelectDocument = (documentId: string) => setCurrentDocumentId(documentId);
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -133,12 +145,14 @@ export default function Home() {
     <div suppressHydrationWarning className="flex h-screen bg-white dark:bg-black">
       <Sidebar
         onNewDocument={handleOpenModal}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onSelectDocument={handleSelectDocument}
         currentDocumentId={currentDocumentId || undefined}
         workspaceId={workspaceId || ''}
         userId={userId}
         userEmail={userEmail}
         onSignOut={handleSignOut}
+        refreshVersion={documentRefreshVersion}
       />
 
       {currentDocumentId ? (
@@ -159,9 +173,11 @@ export default function Home() {
       <NewDocumentModal
         isOpen={isModalOpen}
         onClose={handleCloseModal}
-        onDocumentCreated={handleSelectDocument}
+        onDocumentCreated={handleDocumentCreated}
+        onSuccess={() => setDocumentRefreshVersion((prev) => prev + 1)}
         workspaceId={workspaceId}
         userId={userId}
+        parentId={newDocumentParentId}
       />
 
       <CommandPalette

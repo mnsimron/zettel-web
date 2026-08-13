@@ -11,16 +11,20 @@ interface NewDocumentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onDocumentCreated: (documentId: string) => void;
+  onSuccess?: () => void;
   workspaceId: string;
   userId?: string;
+  parentId?: string | null;
 }
 
 export default function NewDocumentModal({
   isOpen,
   onClose,
   onDocumentCreated,
+  onSuccess,
   workspaceId,
   userId,
+  parentId,
 }: NewDocumentModalProps) {
   const [title, setTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -41,6 +45,7 @@ export default function NewDocumentModal({
       const newDocument: DocumentInsert = {
         title: title.trim(),
         workspace_id: workspaceId,
+        parent_id: parentId ?? null,
         content: '',
         created_by: userId ?? null,
       };
@@ -57,8 +62,9 @@ export default function NewDocumentModal({
 
       if (data) {
         setTitle('');
-        onClose();
+        onSuccess?.();
         onDocumentCreated(data.id);
+        onClose();
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create document';
