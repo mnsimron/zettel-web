@@ -6,6 +6,7 @@ import Sidebar from '@/components/Sidebar';
 import Editor from '@/components/Editor';
 import NewDocumentModal from '@/components/NewDocumentModal';
 import CommandPalette from '@/components/CommandPalette';
+import { TestNotifyButton } from '@/components/TestNotifyButton';
 import { getDefaultWorkspaceId } from '@/lib/workspace';
 import { supabase } from '@/lib/supabase';
 
@@ -155,20 +156,26 @@ export default function Home() {
         refreshVersion={documentRefreshVersion}
       />
 
-      {currentDocumentId ? (
-        <Editor documentId={currentDocumentId} onSelectDocument={handleSelectDocument} />
-      ) : (
-        <div className="flex flex-1 items-center justify-center">
-          <div className="text-center">
-            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-              No document selected
-            </h1>
-            <p className="mt-2 text-sm text-zinc-500">
-              Click “New Page” to create your first document
-            </p>
-          </div>
+      <div className="relative flex flex-1 flex-col">
+        <div className="flex justify-end p-3">
+          <TestNotifyButton />
         </div>
-      )}
+
+        {currentDocumentId ? (
+          <Editor documentId={currentDocumentId} onSelectDocument={handleSelectDocument} />
+        ) : (
+          <div className="flex flex-1 items-center justify-center">
+            <div className="text-center">
+              <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+                No document selected
+              </h1>
+              <p className="mt-2 text-sm text-zinc-500">
+                Click “New Page” to create your first document
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
 
       <NewDocumentModal
         isOpen={isModalOpen}
