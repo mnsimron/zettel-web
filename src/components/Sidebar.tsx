@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
+import { EnableNotificationsButton } from '@/components/EnableNotificationsButton';
 
 type Document = Database['public']['Tables']['documents']['Row'];
 
@@ -574,14 +575,17 @@ export default function Sidebar({
             </div>
           </div>
           {onSignOut && (
-            <button
-              type="button"
-              onClick={onSignOut}
-              className="shrink-0 rounded-md border border-zinc-200 p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              aria-label="Sign out"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex flex-col gap-2">
+              <EnableNotificationsButton />
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="shrink-0 rounded-md border border-zinc-200 p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                aria-label="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
           )}
         </div>
       </div>
