@@ -53,24 +53,24 @@ export function EnableNotificationsButton() {
       }
 
       // OneSignal external user mapping
-      await (OneSignal as any).setExternalUserId(user.id);
+      await (OneSignal as any).login(user.id);
 
       // Read the new v15+ subscription info
       const push = (OneSignal as any).User?.PushSubscription;
-      const playerId = push?.id;
+      const subscriptionId = push?.id;
 
-      if (playerId) {
+      if (subscriptionId) {
         const { error: upsertError } = await supabase
           .from('profiles')
           .update({
-            onesignal_player_id: playerId,
+            onesignal_id: subscriptionId,
             push_notifications_enabled: true,
             updated_at: new Date().toISOString(),
           } as any)
           .eq('id', user.id);
 
         if (upsertError) {
-          throw upsertError;
+          console.error('Failed to update profile with OneSignal ID:', upsertError);
         }
       }
 
@@ -85,20 +85,15 @@ export function EnableNotificationsButton() {
   };
 
   return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        onClick={() => void handleEnable()}
-        disabled={isLoading || isEnabled}
-        className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-      >
-        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
-        {isEnabled ? 'Notifications enabled' : 'Enable Notifications'}
-      </button>
-
-      {error && (
-        <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={() => void handleEnable()}
+      disabled={isLoading || isEnabled}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white p-1.5 text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+      aria-label={isEnabled ? 'Notifications enabled' : 'Enable notifications'}
+      title={isEnabled ? 'Notifications enabled' : 'Enable notifications'}
+    >
+      {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+    </button>
   );
 }

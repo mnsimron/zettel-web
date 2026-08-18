@@ -560,33 +560,36 @@ export default function Sidebar({
       </div>
 
       <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
-        <div className="flex items-center justify-between gap-2 overflow-hidden">
-          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-medium text-white">
-              {(userEmail ?? 'U').slice(0, 1).toUpperCase()}
+        <div className="flex items-start justify-between gap-2 overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
+              {userEmail ?? 'Signed in user'}
             </div>
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <div className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                {userEmail ?? 'Signed in user'}
-              </div>
+
+            <div className="mt-1 flex items-center justify-between gap-2">
               <div className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
                 {userId ? userId.slice(0, 8) : 'No user'}
               </div>
+
+              <div className="flex items-center gap-2">
+                <div className="shrink-0">
+                  <EnableNotificationsButton />
+                </div>
+
+                {onSignOut && (
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="shrink-0 rounded-md border border-zinc-200 p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                    aria-label="Sign out"
+                    title="Sign out"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-          {onSignOut && (
-            <div className="flex flex-col gap-2">
-              <EnableNotificationsButton />
-              <button
-                type="button"
-                onClick={onSignOut}
-                className="shrink-0 rounded-md border border-zinc-200 p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                aria-label="Sign out"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </aside>
