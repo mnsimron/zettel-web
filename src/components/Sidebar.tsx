@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
 import { EnableNotificationsButton } from '@/components/EnableNotificationsButton';
@@ -252,41 +253,59 @@ export default function Sidebar({
     const nextTitle = renameValue.trim() || 'Untitled';
 
     try {
-      const { error: updateError } = await supabase
-        .from('documents')
-        .update({
-          title: nextTitle,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', renameTarget.id);
+      const updatePromise = (async () => {
+        const { error: updateError } = await supabase
+          .from('documents')
+          .update({
+            title: nextTitle,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', renameTarget.id);
 
-      if (updateError) throw updateError;
+        if (updateError) throw updateError;
+      })();
+
+      await toast.promise(updatePromise, {
+        loading: 'Renaming document...',
+        success: 'Document renamed successfully.',
+        error: (err) => err instanceof Error ? err.message : 'Failed to rename document.',
+      });
 
       setRenameTarget(null);
       setRenameValue('');
       setContextMenu(null);
       await fetchDocuments();
     } catch (err) {
-      console.error('Failed to rename document:', err);
+      const message = err instanceof Error ? err.message : 'Failed to rename document.';
+      toast.error(message);
     }
   };
 
   const handleSoftDeleteDocument = async (documentId: string) => {
     try {
-      const { error: updateError } = await supabase
-        .from('documents')
-        .update({
-          is_deleted: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', documentId);
+      const deletePromise = (async () => {
+        const { error: updateError } = await supabase
+          .from('documents')
+          .update({
+            is_deleted: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', documentId);
 
-      if (updateError) throw updateError;
+        if (updateError) throw updateError;
+      })();
+
+      await toast.promise(deletePromise, {
+        loading: 'Deleting document...',
+        success: 'Document deleted.',
+        error: (err) => err instanceof Error ? err.message : 'Failed to delete document.',
+      });
 
       setContextMenu(null);
       await fetchDocuments();
     } catch (err) {
-      console.error('Failed to soft delete document:', err);
+      const message = err instanceof Error ? err.message : 'Failed to delete document.';
+      toast.error(message);
     }
   };
 

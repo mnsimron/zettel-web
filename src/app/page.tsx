@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { LogOut } from 'lucide-react';
+import { toast } from 'sonner';
 import Sidebar from '@/components/Sidebar';
 import Editor from '@/components/Editor';
 import NewDocumentModal from '@/components/NewDocumentModal';
@@ -48,7 +49,7 @@ export default function Home() {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to load workspace';
         setWorkspaceError(message);
-        console.error('Workspace error:', error);
+        toast.error(message);
       } finally {
         if (isMounted) {
           setIsLoadingWorkspace(false);
@@ -89,8 +90,17 @@ export default function Home() {
   };
   const handleSelectDocument = (documentId: string) => setCurrentDocumentId(documentId);
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    window.location.href = '/login';
+    try {
+      await toast.promise(supabase.auth.signOut(), {
+        loading: 'Signing out...',
+        success: 'Signed out successfully.',
+        error: (err) => err instanceof Error ? err.message : 'Failed to sign out.',
+      });
+      window.location.href = '/login';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to sign out.';
+      toast.error(message);
+    }
   };
 
   useEffect(() => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import { toast } from 'sonner';
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -36,7 +37,9 @@ import {
   ListTodo,
   Palette,
   Quote,
+  Share2,
   Strikethrough,
+  Users,
   Subscript as SubscriptIcon,
   Superscript as SuperscriptIcon,
   Type,
@@ -45,6 +48,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
+import ShareDocumentModal from '@/components/ShareDocumentModal';
 
 type Document = Database['public']['Tables']['documents']['Row'];
 
@@ -117,6 +121,18 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
   const [error, setError] = useState<string | null>(null);
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false);
   const [alignmentMenuOpen, setAlignmentMenuOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [collaborators, setCollaborators] = useState<Array<{
+    id: string;
+    user_id: string;
+    role: string;
+    profiles?: {
+      id: string;
+      email: string;
+      full_name?: string | null;
+    } | null;
+  }>>([]);
   const saveTimeoutRef = useRef<number | null>(null);
 
   const insertImageFromUrl = (url: string) => {
@@ -205,6 +221,8 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       setIsSaving(true);
 
       saveTimeoutRef.current = window.setTimeout(async () => {
+        const loadingId = toast.loading('Saving document...');
+
         try {
           const { error: updateError } = await supabase
             .from('documents')
@@ -227,14 +245,49 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
                 }
               : current
           );
+
+          toast.success('Document saved.', { id: loadingId });
         } catch (err) {
-          console.error('Failed to save document content:', err);
+          const message = err instanceof Error ? err.message : 'Failed to save document content.';
+          toast.error(message, { id: loadingId });
         } finally {
           setIsSaving(false);
         }
       }, 1000);
     },
   });
+
+  const fetchCollaborators = async (targetDocumentId: string) => {
+    const { data, error: collaboratorsError } = await supabase
+      .from('document_collaborators')
+      .select(`
+        id,
+        user_id,
+        role,
+        profiles!document_collaborators_user_id_fkey (
+          id,
+          email,
+          full_name
+        )
+      `)
+      .eq('document_id', targetDocumentId)
+      .order('created_at', { ascending: false });
+
+    if (collaboratorsError) {
+      throw collaboratorsError;
+    }
+
+    setCollaborators(((data ?? []) as Array<{
+      id: string;
+      user_id: string;
+      role: string;
+      profiles?: {
+        id: string;
+        email: string;
+        full_name?: string | null;
+      } | null;
+    }>) ?? []);
+  };
 
   useEffect(() => {
     let isCancelled = false;
@@ -268,6 +321,8 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         if (!isCancelled) {
           setDocuments((workspaceDocuments as Document[]) || []);
         }
+
+        await fetchCollaborators(data.id);
       } catch (err) {
         if (isCancelled) return;
         const message = err instanceof Error ? err.message : 'Failed to load document';
@@ -287,6 +342,28 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
   }, [documentId]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) {
+        toast.error(error.message || 'Unable to load current user.');
+        return;
+      }
+
+      if (isMounted) {
+        setCurrentUserId(user?.id ?? null);
+      }
+    };
+
+    void loadUser();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!editor || !document) return;
 
     const html = document.content ?? '';
@@ -303,6 +380,8 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     if (!hasChanged) return;
 
     const timer = window.setTimeout(async () => {
+      const loadingId = toast.loading('Saving title...');
+
       try {
         const { error: updateError } = await supabase
           .from('documents')
@@ -323,8 +402,11 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
               }
             : current
         );
+
+        toast.success('Title updated.', { id: loadingId });
       } catch (err) {
-        console.error('Failed to save title:', err);
+        const message = err instanceof Error ? err.message : 'Failed to save title.';
+        toast.error(message, { id: loadingId });
       }
     }, 1000);
 
@@ -421,28 +503,76 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
             />
           </div>
 
-          <span
-            aria-live="polite"
-            className={[
-              'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide uppercase',
-              isSaving
-                ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300',
-            ].join(' ')}
-          >
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+              <Users className="h-3.5 w-3.5" />
+              {collaborators.length > 0 ? (
+                <div className="flex items-center gap-1.5">
+                  <span>Already shared</span>
+                  <div className="flex items-center gap-1">
+                    {collaborators.slice(0, 2).map((collaborator) => (
+                      <span
+                        key={collaborator.id}
+                        className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                      >
+                        {collaborator.profiles?.full_name || collaborator.profiles?.email || 'Shared user'}
+                      </span>
+                    ))}
+                    {collaborators.length > 2 && (
+                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                        +{collaborators.length - 2} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <span>Not shared yet</span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsShareModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200 dark:hover:bg-indigo-900/60"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              Share
+            </button>
+
             <span
+              aria-live="polite"
               className={[
-                'h-1.5 w-1.5 rounded-full',
-                isSaving ? 'bg-amber-500' : 'bg-emerald-500',
+                'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide uppercase',
+                isSaving
+                  ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300',
               ].join(' ')}
-            />
-            {isSaving ? 'Saving' : 'Saved'}
-          </span>
+            >
+              <span
+                className={[
+                  'h-1.5 w-1.5 rounded-full',
+                  isSaving ? 'bg-amber-500' : 'bg-emerald-500',
+                ].join(' ')}
+              />
+              {isSaving ? 'Saving' : 'Saved'}
+            </span>
+          </div>
         </div>
       </header>
 
       <div className="relative flex-1 overflow-auto">
         <div className="mx-auto max-w-3xl px-8 py-6">
+          {document && (
+            <ShareDocumentModal
+              isOpen={isShareModalOpen}
+              onClose={() => setIsShareModalOpen(false)}
+              onSuccess={() => void fetchCollaborators(document.id)}
+              documentId={document.id}
+              documentName={document.title || 'Untitled Document'}
+              currentUserId={currentUserId ?? undefined}
+            />
+          )}
+
           {editor && (
             <>
               <FloatingMenu

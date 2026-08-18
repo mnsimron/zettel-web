@@ -9,36 +9,56 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.documents TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.workspace_members TO anon, authenticated;
 
--- Enable RLS on workspaces table (if not already enabled)
+-- Ensure tables have RLS enabled
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
 
--- Allow anon users to SELECT workspaces
+-- Drop stale policies first so repeated runs do not leave recursive/duplicate rules behind
+DROP POLICY IF EXISTS "Allow anon select workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Allow anon insert workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Allow anon update workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Allow anon delete workspaces" ON public.workspaces;
+
+DROP POLICY IF EXISTS "Allow anon select documents" ON public.documents;
+DROP POLICY IF EXISTS "Allow anon insert documents" ON public.documents;
+DROP POLICY IF EXISTS "Allow anon update documents" ON public.documents;
+DROP POLICY IF EXISTS "Allow anon delete documents" ON public.documents;
+
+DROP POLICY IF EXISTS "Allow anon select profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow anon insert profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow anon update profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow anon delete profiles" ON public.profiles;
+
+DROP POLICY IF EXISTS "Allow anon select workspace_members" ON public.workspace_members;
+DROP POLICY IF EXISTS "Allow anon insert workspace_members" ON public.workspace_members;
+DROP POLICY IF EXISTS "Allow anon update workspace_members" ON public.workspace_members;
+DROP POLICY IF EXISTS "Allow anon delete workspace_members" ON public.workspace_members;
+
+-- Safe, non-recursive policies for the app.
+-- These intentionally allow the app's anon key to operate while avoiding
+-- table-to-table recursion in Postgres policy evaluation.
 CREATE POLICY "Allow anon select workspaces"
 ON public.workspaces
 FOR SELECT
 USING (true);
 
--- Allow anon users to INSERT workspaces
 CREATE POLICY "Allow anon insert workspaces"
 ON public.workspaces
 FOR INSERT
 WITH CHECK (true);
 
--- Allow anon users to UPDATE workspaces
 CREATE POLICY "Allow anon update workspaces"
 ON public.workspaces
 FOR UPDATE
 USING (true)
 WITH CHECK (true);
 
--- Allow anon users to DELETE workspaces
 CREATE POLICY "Allow anon delete workspaces"
 ON public.workspaces
 FOR DELETE
 USING (true);
-
--- Also apply the same policies to documents table for consistency
-ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow anon select documents"
 ON public.documents
@@ -61,9 +81,6 @@ ON public.documents
 FOR DELETE
 USING (true);
 
--- Optional: Apply same policies to profiles and workspace_members tables
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
 CREATE POLICY "Allow anon select profiles"
 ON public.profiles
 FOR SELECT
@@ -84,8 +101,6 @@ CREATE POLICY "Allow anon delete profiles"
 ON public.profiles
 FOR DELETE
 USING (true);
-
-ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow anon select workspace_members"
 ON public.workspace_members
@@ -109,27 +124,25 @@ FOR DELETE
 USING (true);
 
 -- Optional: Create a trigger to automatically create profiles for new auth users
--- This ensures profiles always exist when workspace_members references them
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger as $$
+RETURNS trigger AS $$
 BEGIN
   INSERT INTO public.profiles (id, email, full_name)
   VALUES (
-    new.id, 
-    new.email, 
+    new.id,
+    new.email,
     COALESCE(new.raw_user_meta_data->>'full_name', '')
   )
   ON CONFLICT (id) DO UPDATE
-  SET email = EXCLUDED.email, full_name = EXCLUDED.full_name;
+  SET email = EXCLUDED.email,
+      full_name = EXCLUDED.full_name;
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- Drop the old trigger if it exists
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 
--- Create the new trigger
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW 
+  FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();

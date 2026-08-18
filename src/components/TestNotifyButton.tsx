@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
 export function TestNotifyButton() {
@@ -33,10 +34,10 @@ export function TestNotifyButton() {
         throw new Error(text || 'Failed to send notification');
       }
 
-      alert('Notifikasi Terkirim!');
+      toast.success('Notifikasi terkirim!');
     } catch (err) {
       console.error('TestNotifyButton error:', err);
-      alert('Gagal mengirim notifikasi. Lihat console untuk detail.');
+      toast.error('Gagal mengirim notifikasi. Lihat console untuk detail.');
     } finally {
       setLoading(false);
     }

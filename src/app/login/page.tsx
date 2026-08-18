@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, Loader2, Lock, Mail, Sparkles, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
 function GitHubIcon() {
@@ -73,19 +74,29 @@ export default function LoginPage() {
     setIsGithubLoading(true);
 
     try {
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: 'github',
-        options: {
-          redirectTo: `${window.location.origin}/`,
-        },
-      });
+      const authPromise = (async () => {
+        const { error: oauthError } = await supabase.auth.signInWithOAuth({
+          provider: 'github',
+          options: {
+            redirectTo: `${window.location.origin}/`,
+          },
+        });
 
-      if (oauthError) {
-        throw oauthError;
-      }
+        if (oauthError) {
+          throw oauthError;
+        }
+      })();
+
+      await toast.promise(authPromise, {
+        loading: 'Connecting to GitHub...',
+        success: 'GitHub sign-in started successfully.',
+        error: (err) => getFriendlyAuthError(err instanceof Error ? err.message : 'GitHub sign-in failed.'),
+      });
     } catch (err) {
       const nextError = err instanceof Error ? getFriendlyAuthError(err.message) : 'GitHub sign-in failed.';
       setError(nextError);
+      toast.error(nextError);
+    } finally {
       setIsGithubLoading(false);
     }
   };
@@ -96,7 +107,9 @@ export default function LoginPage() {
     setError(null);
 
     if (mode === 'signup' && password !== confirmPassword) {
-      setError('Passwords do not match. Please re-enter them.');
+      const nextError = 'Passwords do not match. Please re-enter them.';
+      setError(nextError);
+      toast.error(nextError);
       return;
     }
 
@@ -104,39 +117,61 @@ export default function LoginPage() {
 
     try {
       if (mode === 'signup') {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: fullName,
+        const signUpPromise = (async () => {
+          const response = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: {
+                full_name: fullName,
+              },
             },
-          },
-        });
+          });
 
-        if (signUpError) {
-          throw signUpError;
-        }
+          if (response.error) {
+            throw response.error;
+          }
 
-        if (data.user && !data.session) {
+          return response;
+        })();
+
+        const res = (await toast.promise(signUpPromise, {
+          loading: 'Creating your account...',
+          success: 'Account created successfully!',
+          error: (err) => getFriendlyAuthError(err instanceof Error ? err.message : 'Sign-up failed.'),
+        })) as any;
+
+        if (res?.data?.user && !res.data.session) {
           setMessage('Check your inbox to confirm your email before logging in.');
+          toast.success('Check your inbox to confirm your email before logging in.');
           return;
         }
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const signInPromise = (async () => {
+          const response = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
 
-        if (signInError) {
-          throw signInError;
-        }
+          if (response.error) {
+            throw response.error;
+          }
+
+          return response;
+        })();
+
+        await toast.promise(signInPromise, {
+          loading: 'Signing you in...',
+          success: 'Logged in successfully!',
+          error: (err) => getFriendlyAuthError(err instanceof Error ? err.message : 'Authentication failed.'),
+        });
       }
 
       router.replace('/');
     } catch (err) {
       const nextError = err instanceof Error ? getFriendlyAuthError(err.message) : 'Authentication failed.';
       setError(nextError);
+      toast.error(nextError);
     } finally {
       setIsSubmitting(false);
     }

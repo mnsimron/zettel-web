@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
 
@@ -62,6 +63,7 @@ export default function NewDocumentModal({
 
       if (data) {
         setTitle('');
+        toast.success('Document created successfully!');
         onSuccess?.();
         onDocumentCreated(data.id);
         onClose();
@@ -69,6 +71,7 @@ export default function NewDocumentModal({
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create document';
       setError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
