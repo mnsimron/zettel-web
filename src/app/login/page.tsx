@@ -1,8 +1,9 @@
-'use client';
+"use client";
 
 import { useEffect, useState } from 'react';
 import { ArrowRight, Loader2, Lock, Mail, Sparkles, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
@@ -278,6 +279,9 @@ export default function LoginPage() {
                 placeholder={mode === 'login' ? 'Enter your password' : 'Create a password'}
                 className="w-full rounded-xl border border-zinc-200 bg-zinc-50 py-2.5 pl-10 pr-3 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-zinc-300 focus:ring-2 focus:ring-indigo-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:placeholder:text-zinc-500 dark:focus:border-zinc-600 dark:focus:ring-indigo-500/10"
               />
+            </div>
+            <div className="mt-2 text-right">
+              <Link href="/forgot-password" className="text-sm text-zinc-600 hover:underline dark:text-zinc-300">Forgot password?</Link>
             </div>
           </div>
 

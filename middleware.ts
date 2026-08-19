@@ -22,7 +22,15 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data?.user ?? null;
+  } catch (err) {
+    // Suppress Supabase "Invalid Refresh Token" noise during middleware checks.
+    // Treat errors as unauthenticated so middleware redirects to the login route.
+    user = null;
+  }
   const { pathname } = request.nextUrl;
   const isLoginRoute = pathname === '/login';
   const isProtectedRoute = pathname === '/' || pathname.startsWith('/app');
@@ -39,5 +47,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/app/:path*', '/login'],
+  // Exclude `/login` from the matcher so middleware does not run for the
+  // public login page (helps avoid middleware-related 404s while debugging).
+  matcher: ['/', '/app/:path*'],
 };

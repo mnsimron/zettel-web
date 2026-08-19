@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
 
 export function TestNotifyButton() {
   const [loading, setLoading] = useState(false);
@@ -20,7 +20,7 @@ export function TestNotifyButton() {
       const payload = {
         targetUserIds: [user.id],
         title: 'Zettel Automations 🪄',
-        message: 'Notifikasi ini ditembak otomatis dari Vercel API!',
+        message: 'This notification was sent automatically from the API for testing.',
       };
 
       const res = await fetch('/api/notify', {
@@ -34,10 +34,10 @@ export function TestNotifyButton() {
         throw new Error(text || 'Failed to send notification');
       }
 
-      toast.success('Notifikasi terkirim!');
+      toast.success('Notification sent!');
     } catch (err) {
       console.error('TestNotifyButton error:', err);
-      toast.error('Gagal mengirim notifikasi. Lihat console untuk detail.');
+      toast.error('Failed to send notification. Check console for details.');
     } finally {
       setLoading(false);
     }
