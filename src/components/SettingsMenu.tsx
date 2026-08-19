@@ -20,6 +20,11 @@ export function SettingsMenu() {
 
   const rootRef = useRef<HTMLDivElement | null>(null);
 
+  const getOneSignal = () => {
+    if (typeof window === 'undefined') return null;
+    return (window as any).OneSignal ?? null;
+  };
+
   // Menutup dropdown jika user klik di luar menu
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -36,45 +41,66 @@ export function SettingsMenu() {
 
   // Cek status OneSignal saat komponen dimuat
   useEffect(() => {
-    const checkOneSignalState = async () => {
-      if (typeof window !== 'undefined' && window.OneSignal) {
-        // Asumsi menggunakan OneSignal versi terbaru (v16+)
-        const isOptedIn = window.OneSignal.User.PushSubscription.optedIn;
-        setIsPushEnabled(!!isOptedIn);
+    const OneSignal = getOneSignal();
+    if (!OneSignal) {
+      const waitForInit = window.setTimeout(() => {
+        const latestOneSignal = getOneSignal();
+        if (!latestOneSignal) return;
 
-        // Opsional: Dengarkan perubahan status dari luar
-        window.OneSignal.User.PushSubscription.addEventListener("change", (event: any) => {
-          setIsPushEnabled(event.current.optedIn);
+        const subscription = latestOneSignal.User?.PushSubscription;
+        if (!subscription) return;
+
+        setIsPushEnabled(Boolean(subscription.optedIn));
+        subscription.addEventListener?.('change', (event: any) => {
+          setIsPushEnabled(Boolean(event?.current?.optedIn));
         });
-      }
-    };
+      }, 500);
 
-    checkOneSignalState();
-  }, [open]); // Cek ulang setiap kali dropdown dibuka
+      return () => window.clearTimeout(waitForInit);
+    }
+
+    const subscription = OneSignal.User?.PushSubscription;
+    if (!subscription) return;
+
+    setIsPushEnabled(Boolean(subscription.optedIn));
+    subscription.addEventListener?.('change', (event: any) => {
+      setIsPushEnabled(Boolean(event?.current?.optedIn));
+    });
+
+    return () => {
+      subscription.removeEventListener?.('change', (event: any) => {
+        setIsPushEnabled(Boolean(event?.current?.optedIn));
+      });
+    };
+  }, []);
 
   const handleTogglePush = async () => {
-    if (typeof window === 'undefined' || !window.OneSignal) {
-      toast.error('OneSignal is not initialized yet.');
+    const OneSignal = getOneSignal();
+    const pushSubscription = OneSignal?.User?.PushSubscription;
+
+    if (!OneSignal || !pushSubscription) {
+      toast.error('OneSignal belum siap. Silakan coba lagi sebentar.');
       return;
     }
 
     setIsPushLoading(true);
+
     try {
-      if (isPushEnabled) {
-        // Jika sedang aktif -> Matikan (Unsubscribe)
-        await window.OneSignal.User.PushSubscription.optOut();
-        setIsPushEnabled(false);
-        toast.success('Push notifications disabled.');
-      } else {
-        // Jika sedang mati -> Aktifkan (Subscribe)
-        await window.OneSignal.Notifications.requestPermission();
-        await window.OneSignal.User.PushSubscription.optIn();
-        setIsPushEnabled(true);
+      const shouldEnable = !isPushEnabled;
+      setIsPushEnabled(shouldEnable);
+
+      if (shouldEnable) {
+        await OneSignal.Notifications.requestPermission();
+        await pushSubscription.optIn();
         toast.success('Push notifications enabled!');
+      } else {
+        await pushSubscription.optOut();
+        toast.success('Push notifications disabled.');
       }
     } catch (error) {
       console.error('OneSignal Toggle Error:', error);
-      toast.error('Failed to change notification settings.');
+      setIsPushEnabled(!isPushEnabled);
+      toast.error('Gagal mengubah pengaturan notifikasi.');
     } finally {
       setIsPushLoading(false);
     }

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from 'sonner';
 import { HydrationFix } from '@/components/HydrationFix';
 import OneSignalProvider from '@/components/OneSignalProvider';
+import Script from 'next/script';
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,7 +33,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body suppressHydrationWarning={true} className="min-h-full flex flex-col">
         <HydrationFix />
-        <OneSignalProvider />
+
+        <Script 
+          src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" 
+          strategy="afterInteractive" 
+        />
+        <OneSignalProvider />        
         {children}
         <Toaster richColors position="top-right" closeButton />
       </body>
