@@ -16,7 +16,7 @@ import {
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
-import { EnableNotificationsButton } from '@/components/EnableNotificationsButton';
+import { EnableNotificationsButton } from './EnableNotificationsButton';
 import { SettingsMenu } from '@/components/SettingsMenu';
 
 type Document = Database['public']['Tables']['documents']['Row'];

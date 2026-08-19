@@ -8,8 +8,8 @@ import { toast } from 'sonner';
 export function EnableNotificationsButton() {
   const [isLoading, setIsLoading] = useState(false);
   const [isEnabled, setIsEnabled] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Cek status OneSignal saat komponen dimuat
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -20,7 +20,6 @@ export function EnableNotificationsButton() {
         const push = OneSignal?.User?.PushSubscription;
         setIsEnabled(Boolean(push?.optedIn));
 
-        // Dengarkan jika user mematikan/menyalakan dari setelan browser
         push?.addEventListener?.('change', (ev: any) => {
           setIsEnabled(Boolean(ev?.current?.optedIn));
         });
@@ -31,75 +30,141 @@ export function EnableNotificationsButton() {
   }, []);
 
   const handleEnable = async () => {
-    // Early detection: jika browser memblokir notifikasi
-    if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-      toast.error('Notifications are blocked in this browser. Please enable them in your URL bar settings.');
-      return;
-    }
-
     setIsLoading(true);
+    setError(null);
 
-    const win = window as any;
-    win.OneSignalDeferred = win.OneSignalDeferred || [];
+    try {
+      if (typeof window === 'undefined') throw new Error('Window not available');
 
-    // Kita gunakan push() agar dieksekusi begitu OneSignal siap
-    win.OneSignalDeferred.push(async (OneSignal: any) => {
-      try {
-        // 1. Minta izin notifikasi (TIDAK PERLU init() lagi)
-        if (OneSignal?.Slidedown?.promptPush) {
-          await OneSignal.Slidedown.promptPush();
-        } else if (OneSignal?.Notifications?.requestPermission) {
-          await OneSignal.Notifications.requestPermission();
+      const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
+      if (!appId) {
+        throw new Error('OneSignal App ID is not configured.');
+      }
+
+      // Early detection: if browser has blocked notifications, bail out quickly
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        const msg = 'Notifications are blocked in this browser. Please enable them in your browser settings.';
+        toast.error(msg);
+        setError(msg);
+        return;
+      }
+
+      const win = window as any;
+
+      // Safety delay: wait a short period before attempting to push/run the handler.
+      // This helps detect when the SDK script was blocked by an AdBlocker (net::ERR_BLOCKED_BY_CLIENT).
+      if (!win.OneSignal) {
+        const safetyDelayMs = 3500;
+        await new Promise((resolve) => setTimeout(resolve, safetyDelayMs));
+
+        if (!win.OneSignal) {
+          const msg = 'Push notifications are blocked by your browser or an AdBlocker. Please disable it and try again.';
+          toast.error(msg);
+          setError(msg);
+          return;
         }
+      }
 
-        // Cek apakah user akhirnya menyetujui (Opted In)
-        const isOptedIn = OneSignal?.User?.PushSubscription?.optedIn;
-        if (!isOptedIn) {
-          setIsLoading(false);
-          return; // Batal berlangganan, tidak perlu lanjut ke Supabase
-        }
+      // Use a Promise that resolves once the handler runs (either immediately if OneSignal present, or via deferred), with timeout
+      await new Promise<void>((resolve, reject) => {
+        win.OneSignalDeferred = win.OneSignalDeferred || [];
 
-        // 2. Ambil data user dari Supabase
-        const { data: userData, error: authError } = await supabase.auth.getUser();
-        const user = userData?.user;
+        let settled = false;
+        const timeoutMs = 10000; // 10s
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error('OneSignal initialization timed out'));
+          }
+        }, timeoutMs);
 
-        if (authError || !user) {
-          throw new Error('User not authenticated.');
-        }
+        const runHandler = (OneSignal: any) => {
+          (async () => {
+            try {
+              if (OneSignal?.init) {
+                await OneSignal.init({
+                  appId,
+                  notifyButton: { enable: false },
+                  allowLocalhostAsSecureOrigin: true,
+                  autoResubscribe: true,
+                });
+              }
 
-        // 3. Daftarkan user ke OneSignal dengan ID mereka
-        if (OneSignal?.login) {
-          await OneSignal.login(user.id);
-        }
+              // show prompt (slidedown) if available
+              if (OneSignal?.Slidedown?.promptPush) {
+                await OneSignal.Slidedown.promptPush();
+              } else if (OneSignal?.Notifications?.requestPermission) {
+                await OneSignal.Notifications.requestPermission();
+              }
 
-        // 4. Simpan OneSignal ID ke tabel profiles di Supabase
-        const subscriptionId = OneSignal?.User?.PushSubscription?.id;
-        if (subscriptionId) {
-        const { error: upsertError } = await supabase
-          .from('profiles')
-          .update({
-            onesignal_id: subscriptionId,
-            push_notifications_enabled: true,
-            updated_at: new Date().toISOString(),
-          } as any)
-          .eq('id', user.id);
+              const { data: userData } = await supabase.auth.getUser();
+              const user = userData?.user;
 
-          if (upsertError) {
-            console.error('Failed to update profile:', upsertError);
-            throw new Error('Failed to save notification settings to database.');
+              if (!user) {
+                throw new Error('User not authenticated.');
+              }
+
+              if (OneSignal?.login) {
+                await OneSignal.login(user.id);
+              }
+
+              const push = OneSignal?.User?.PushSubscription;
+              const subscriptionId = push?.id;
+
+              if (subscriptionId) {
+                const { error: upsertError } = await supabase
+                  .from('profiles')
+                  .update({
+                    onesignal_id: subscriptionId,
+                    push_notifications_enabled: true,
+                    updated_at: new Date().toISOString(),
+                  } as any)
+                  .eq('id', user.id);
+
+                if (upsertError) console.error('Failed to update profile with OneSignal ID:', upsertError);
+              }
+
+              if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                setIsEnabled(true);
+                toast.success('Notifications enabled successfully!');
+                resolve();
+              }
+            } catch (err) {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                reject(err);
+              }
+            }
+          })();
+        };
+
+        try {
+          if (win.OneSignal) {
+            // If SDK already loaded, run handler immediately
+            runHandler(win.OneSignal);
+          } else {
+            // Otherwise push to deferred callbacks
+            win.OneSignalDeferred.push((OneSignal: any) => runHandler(OneSignal));
+          }
+        } catch (err) {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
           }
         }
-
-        setIsEnabled(true);
-        toast.success('Notifications enabled successfully!');
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unable to enable notifications.';
-        console.error('Enable notifications error:', err);
-        toast.error(message);
-      } finally {
-        setIsLoading(false);
-      }
-    });
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to enable notifications.';
+      setError(message);
+      console.error('Enable notifications error:', err);
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
