@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import OneSignal from 'react-onesignal';
 import { supabase } from '@/lib/supabase';
 import { Settings, Bell, Lock, LogOut, X, Check } from 'lucide-react';
 import { toast } from 'sonner';
@@ -20,11 +21,6 @@ export function SettingsMenu() {
 
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  const getOneSignal = () => {
-    if (typeof window === 'undefined') return null;
-    return (window as any).OneSignal ?? null;
-  };
-
   // Menutup dropdown jika user klik di luar menu
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -39,67 +35,73 @@ export function SettingsMenu() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
-  // Cek status OneSignal saat komponen dimuat
   useEffect(() => {
-    const OneSignal = getOneSignal();
-    if (!OneSignal) {
-      const waitForInit = window.setTimeout(() => {
-        const latestOneSignal = getOneSignal();
-        if (!latestOneSignal) return;
+    const initOneSignal = async () => {
+      const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 
-        const subscription = latestOneSignal.User?.PushSubscription;
-        if (!subscription) return;
+      if (!appId || typeof window === 'undefined') {
+        return;
+      }
 
-        setIsPushEnabled(Boolean(subscription.optedIn));
-        subscription.addEventListener?.('change', (event: any) => {
+      try {
+        await (OneSignal as any).init({
+          appId,
+          notifyButton: { enable: false } as any,
+          allowLocalhostAsSecureOrigin: true,
+          autoResubscribe: true,
+        });
+
+        const push = (OneSignal as any).User?.PushSubscription;
+        if (!push) return;
+
+        setIsPushEnabled(Boolean(push.optedIn));
+
+        push.addEventListener?.('change', (event: any) => {
           setIsPushEnabled(Boolean(event?.current?.optedIn));
         });
-      }, 500);
-
-      return () => window.clearTimeout(waitForInit);
-    }
-
-    const subscription = OneSignal.User?.PushSubscription;
-    if (!subscription) return;
-
-    setIsPushEnabled(Boolean(subscription.optedIn));
-    subscription.addEventListener?.('change', (event: any) => {
-      setIsPushEnabled(Boolean(event?.current?.optedIn));
-    });
-
-    return () => {
-      subscription.removeEventListener?.('change', (event: any) => {
-        setIsPushEnabled(Boolean(event?.current?.optedIn));
-      });
+      } catch (error) {
+        console.error('OneSignal init error:', error);
+      }
     };
+
+    void initOneSignal();
   }, []);
 
   const handleTogglePush = async () => {
-    const OneSignal = getOneSignal();
-    const pushSubscription = OneSignal?.User?.PushSubscription;
-
-    if (!OneSignal || !pushSubscription) {
-      toast.error('OneSignal belum siap. Silakan coba lagi sebentar.');
-      return;
-    }
-
     setIsPushLoading(true);
 
     try {
+      const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
+      if (!appId) {
+        throw new Error('OneSignal App ID is not configured.');
+      }
+
+      await (OneSignal as any).init({
+        appId,
+        notifyButton: { enable: false } as any,
+        allowLocalhostAsSecureOrigin: true,
+        autoResubscribe: true,
+      });
+
+      const pushSubscription = (OneSignal as any).User?.PushSubscription;
+      if (!pushSubscription) {
+        throw new Error('OneSignal belum siap. Silakan coba lagi sebentar.');
+      }
+
       const shouldEnable = !isPushEnabled;
-      setIsPushEnabled(shouldEnable);
 
       if (shouldEnable) {
-        await OneSignal.Notifications.requestPermission();
+        await (OneSignal as any).Notifications.requestPermission();
         await pushSubscription.optIn();
+        setIsPushEnabled(true);
         toast.success('Push notifications enabled!');
       } else {
         await pushSubscription.optOut();
+        setIsPushEnabled(false);
         toast.success('Push notifications disabled.');
       }
     } catch (error) {
       console.error('OneSignal Toggle Error:', error);
-      setIsPushEnabled(!isPushEnabled);
       toast.error('Gagal mengubah pengaturan notifikasi.');
     } finally {
       setIsPushLoading(false);
