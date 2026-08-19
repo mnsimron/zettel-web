@@ -30,14 +30,31 @@ export function TestNotifyButton() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || 'Failed to send notification');
+        // Try to parse JSON error bodies from the API first
+        let serverMessage = 'Failed to send notification';
+        try {
+          const json = await res.json();
+          if (json) {
+            serverMessage = json.error || json.message || JSON.stringify(json);
+          }
+        } catch (_) {
+          // fall back to plain text
+          try {
+            const text = await res.text();
+            if (text) serverMessage = text;
+          } catch (_) {
+            /* ignore */
+          }
+        }
+
+        throw new Error(serverMessage);
       }
 
       toast.success('Notification sent!');
     } catch (err) {
       console.error('TestNotifyButton error:', err);
-      toast.error('Failed to send notification. Check console for details.');
+      const message = err instanceof Error ? err.message : 'Failed to send notification.';
+      toast.error(message);
     } finally {
       setLoading(false);
     }
