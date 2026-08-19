@@ -230,12 +230,12 @@ export function EnableNotificationsButton() {
     <button
       type="button"
       onClick={() => void handleEnable()}
-      disabled={isLoading || isEnabled || missingConfiguration}
+      disabled={isLoading || missingConfiguration}
       className={`inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white p-1.5 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800 ${
         isEnabled ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-700 dark:text-zinc-200'
       }`}
-      aria-label={isEnabled ? 'Notifications enabled' : 'Enable notifications'}
-      title={error || (isEnabled ? 'Notifications enabled' : 'Enable notifications')}
+      aria-label={isEnabled ? 'Notifications enabled; click to refresh' : 'Enable notifications'}
+      title={error || (isEnabled ? 'Notifications enabled; click to refresh' : 'Enable notifications')}
     >
       {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
     </button>
