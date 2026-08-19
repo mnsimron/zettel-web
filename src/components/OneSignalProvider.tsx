@@ -5,11 +5,7 @@ import { useEffect } from 'react';
 
 const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 
-const getOneSignalWindow = () =>
-  window as Window & {
-    OneSignal?: any;
-    OneSignalDeferred?: Array<(OneSignal: any) => void>;
-  };
+const getOneSignalWindow = () => window as any;
 
 export default function OneSignalProvider() {
   useEffect(() => {

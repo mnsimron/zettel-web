@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import OneSignal from 'react-onesignal';
 import { supabase } from '@/lib/supabase';
-import { Settings, Bell, Lock, LogOut, X, Check } from 'lucide-react';
+import { Settings, Lock, LogOut, X, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function SettingsMenu() {
@@ -14,14 +13,9 @@ export function SettingsMenu() {
   const [loading, setLoading] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  
-  // State untuk Toggle OneSignal
-  const [isPushEnabled, setIsPushEnabled] = useState(false);
-  const [isPushLoading, setIsPushLoading] = useState(false);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // Menutup dropdown jika user klik di luar menu
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       const el = rootRef.current;
@@ -35,84 +29,11 @@ export function SettingsMenu() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
-  useEffect(() => {
-    const initOneSignal = async () => {
-      const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
-
-      if (!appId || typeof window === 'undefined') {
-        return;
-      }
-
-      try {
-        await (OneSignal as any).init({
-          appId,
-          notifyButton: { enable: false } as any,
-          allowLocalhostAsSecureOrigin: true,
-          autoResubscribe: true,
-        });
-
-        const push = (OneSignal as any).User?.PushSubscription;
-        if (!push) return;
-
-        setIsPushEnabled(Boolean(push.optedIn));
-
-        push.addEventListener?.('change', (event: any) => {
-          setIsPushEnabled(Boolean(event?.current?.optedIn));
-        });
-      } catch (error) {
-        console.error('OneSignal init error:', error);
-      }
-    };
-
-    void initOneSignal();
-  }, []);
-
-  const handleTogglePush = async () => {
-    setIsPushLoading(true);
-
-    try {
-      const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
-      if (!appId) {
-        throw new Error('OneSignal App ID is not configured.');
-      }
-
-      await (OneSignal as any).init({
-        appId,
-        notifyButton: { enable: false } as any,
-        allowLocalhostAsSecureOrigin: true,
-        autoResubscribe: true,
-      });
-
-      const pushSubscription = (OneSignal as any).User?.PushSubscription;
-      if (!pushSubscription) {
-        throw new Error('OneSignal belum siap. Silakan coba lagi sebentar.');
-      }
-
-      const shouldEnable = !isPushEnabled;
-
-      if (shouldEnable) {
-        await (OneSignal as any).Notifications.requestPermission();
-        await pushSubscription.optIn();
-        setIsPushEnabled(true);
-        toast.success('Push notifications enabled!');
-      } else {
-        await pushSubscription.optOut();
-        setIsPushEnabled(false);
-        toast.success('Push notifications disabled.');
-      }
-    } catch (error) {
-      console.error('OneSignal Toggle Error:', error);
-      toast.error('Gagal mengubah pengaturan notifikasi.');
-    } finally {
-      setIsPushLoading(false);
-    }
-  };
-
   const handleOpenChangePassword = () => {
     setNewPassword('');
     setConfirmPassword('');
     setShowChangePassword(true);
-    setOpen(false); // Tutup dropdown
+    setOpen(false);
   };
 
   const handleSavePassword = async () => {
@@ -129,7 +50,7 @@ export function SettingsMenu() {
     try {
       const { error: supError } = await supabase.auth.updateUser({ password: newPassword });
       if (supError) throw supError;
-      
+
       toast.success('Password updated successfully.');
       setTimeout(() => setShowChangePassword(false), 900);
     } catch (err) {
@@ -169,34 +90,6 @@ export function SettingsMenu() {
       {open && (
         <div className="absolute bottom-full right-0 z-50 mb-2 w-56 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
           <div className="py-2">
-            
-            {/* ITEM 1: TOGGLE NOTIFICATIONS */}
-            <div className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200">
-              <div className="flex items-center gap-2">
-                <Bell className="h-4 w-4" />
-                <span>Notifications</span>
-              </div>
-              
-              {/* Toggle Switch UI */}
-              <button
-                type="button"
-                role="switch"
-                aria-checked={isPushEnabled}
-                disabled={isPushLoading}
-                onClick={handleTogglePush}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-zinc-900 ${
-                  isPushEnabled ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                    isPushEnabled ? 'translate-x-4' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* ITEM 2: CHANGE PASSWORD */}
             <button
               type="button"
               onClick={handleOpenChangePassword}
@@ -208,7 +101,6 @@ export function SettingsMenu() {
 
             <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
 
-            {/* ITEM 3: SIGN OUT */}
             <button
               type="button"
               onClick={handleSignOut}
@@ -221,15 +113,14 @@ export function SettingsMenu() {
         </div>
       )}
 
-      {/* Modal Change Password tetap sama... */}
       {showChangePassword && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-zinc-900 dark:border dark:border-zinc-800">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-50">Change Password</h3>
-              <button 
-                type="button" 
-                onClick={() => setShowChangePassword(false)} 
+              <button
+                type="button"
+                onClick={() => setShowChangePassword(false)}
                 className="rounded-full p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
               >
                 <X className="h-4 w-4" />

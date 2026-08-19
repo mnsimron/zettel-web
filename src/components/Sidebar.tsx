@@ -592,9 +592,12 @@ export default function Sidebar({
             </div>
           </div>
 
-          {/* Menu Settings (Tombol Gear) */}
-          <div className="relative shrink-0">
-            <SettingsMenu />
+          {/* Actions: notifications + settings */}
+          <div className="flex items-center gap-2 shrink-0">
+            <EnableNotificationsButton />
+            <div className="relative">
+              <SettingsMenu />
+            </div>
           </div>
 
         </div>
