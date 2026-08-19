@@ -13,6 +13,10 @@ export function SettingsMenu() {
   const [loading, setLoading] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  
+  // State untuk Toggle OneSignal
+  const [isPushEnabled, setIsPushEnabled] = useState(false);
+  const [isPushLoading, setIsPushLoading] = useState(false);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -30,16 +34,57 @@ export function SettingsMenu() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
-  const handleEnableNotifications = () => {
-    // TODO: Insert OneSignal logic here
-    setOpen(false);
+  // Cek status OneSignal saat komponen dimuat
+  useEffect(() => {
+    const checkOneSignalState = async () => {
+      if (typeof window !== 'undefined' && window.OneSignal) {
+        // Asumsi menggunakan OneSignal versi terbaru (v16+)
+        const isOptedIn = window.OneSignal.User.PushSubscription.optedIn;
+        setIsPushEnabled(!!isOptedIn);
+
+        // Opsional: Dengarkan perubahan status dari luar
+        window.OneSignal.User.PushSubscription.addEventListener("change", (event: any) => {
+          setIsPushEnabled(event.current.optedIn);
+        });
+      }
+    };
+
+    checkOneSignalState();
+  }, [open]); // Cek ulang setiap kali dropdown dibuka
+
+  const handleTogglePush = async () => {
+    if (typeof window === 'undefined' || !window.OneSignal) {
+      toast.error('OneSignal is not initialized yet.');
+      return;
+    }
+
+    setIsPushLoading(true);
+    try {
+      if (isPushEnabled) {
+        // Jika sedang aktif -> Matikan (Unsubscribe)
+        await window.OneSignal.User.PushSubscription.optOut();
+        setIsPushEnabled(false);
+        toast.success('Push notifications disabled.');
+      } else {
+        // Jika sedang mati -> Aktifkan (Subscribe)
+        await window.OneSignal.Notifications.requestPermission();
+        await window.OneSignal.User.PushSubscription.optIn();
+        setIsPushEnabled(true);
+        toast.success('Push notifications enabled!');
+      }
+    } catch (error) {
+      console.error('OneSignal Toggle Error:', error);
+      toast.error('Failed to change notification settings.');
+    } finally {
+      setIsPushLoading(false);
+    }
   };
 
   const handleOpenChangePassword = () => {
     setNewPassword('');
     setConfirmPassword('');
     setShowChangePassword(true);
-    setOpen(false);
+    setOpen(false); // Tutup dropdown
   };
 
   const handleSavePassword = async () => {
@@ -69,10 +114,7 @@ export function SettingsMenu() {
 
   const handleSignOut = async () => {
     try {
-      // Menghapus sesi di klien
       await supabase.auth.signOut();
-
-      // Force reload agar cookie server ikut terhapus
       if (typeof window !== 'undefined') {
         window.location.assign('/login');
       } else {
@@ -86,7 +128,6 @@ export function SettingsMenu() {
 
   return (
     <div className="relative" ref={rootRef}>
-      {/* Tombol Gear (Settings) */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -97,18 +138,37 @@ export function SettingsMenu() {
         <Settings className="h-5 w-5" />
       </button>
 
-      {/* Dropdown Menu */}
       {open && (
-          <div className="absolute bottom-full right-0 z-50 mb-2 w-56 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-900">          <div className="py-2">
-            <button
-              type="button"
-              onClick={handleEnableNotifications}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-            >
-              <Bell className="h-4 w-4" />
-              Enable Notifications
-            </button>
+        <div className="absolute bottom-full right-0 z-50 mb-2 w-56 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="py-2">
+            
+            {/* ITEM 1: TOGGLE NOTIFICATIONS */}
+            <div className="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200">
+              <div className="flex items-center gap-2">
+                <Bell className="h-4 w-4" />
+                <span>Notifications</span>
+              </div>
+              
+              {/* Toggle Switch UI */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isPushEnabled}
+                disabled={isPushLoading}
+                onClick={handleTogglePush}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-zinc-900 ${
+                  isPushEnabled ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isPushEnabled ? 'translate-x-4' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
 
+            {/* ITEM 2: CHANGE PASSWORD */}
             <button
               type="button"
               onClick={handleOpenChangePassword}
@@ -120,6 +180,7 @@ export function SettingsMenu() {
 
             <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
 
+            {/* ITEM 3: SIGN OUT */}
             <button
               type="button"
               onClick={handleSignOut}
@@ -132,7 +193,7 @@ export function SettingsMenu() {
         </div>
       )}
 
-      {/* Modal Change Password */}
+      {/* Modal Change Password tetap sama... */}
       {showChangePassword && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl dark:bg-zinc-900 dark:border dark:border-zinc-800">
