@@ -5,53 +5,40 @@ import { useEffect } from 'react';
 
 const appId = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
 
-const getOneSignalWindow = () => window as any;
-
 export default function OneSignalProvider() {
   useEffect(() => {
-    if (!appId || typeof window === 'undefined') {
-      console.warn('OneSignal app ID is not configured.');
-      return;
-    }
+    if (!appId || typeof window === 'undefined') return;
 
-    const waitForOneSignal = () => {
-      const oneSignalWindow = getOneSignalWindow();
+    const win = window as any;
 
-      if (oneSignalWindow.OneSignal) {
-        return;
+    // Bendera penanda: Jika sudah pernah init, hentikan proses ini!
+    if (win.OneSignalInitialized) return;
+    
+    win.OneSignalDeferred = win.OneSignalDeferred || [];
+    win.OneSignalDeferred.push(async function(OneSignal: any) {
+      try {
+        await OneSignal.init({
+          appId: appId,
+          allowLocalhostAsSecureOrigin: true,
+          notifyButton: { enable: false },
+          autoResubscribe: true
+        });
+        
+        // Tandai bahwa mesin sudah menyala
+        win.OneSignalInitialized = true;
+      } catch (error) {
+        console.error("OneSignal Init Error:", error);
       }
-
-      window.setTimeout(waitForOneSignal, 200);
-    };
-
-    waitForOneSignal();
+    });
   }, []);
 
-  if (!appId) {
-    return null;
-  }
+  if (!appId) return null;
 
   return (
-    <>
-      <Script
-        id="onesignal-sdk"
-        src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"
-        strategy="afterInteractive"
-      />
-
-      <Script id="onesignal-init" strategy="afterInteractive">
-        {`
-          window.OneSignalDeferred = window.OneSignalDeferred || [];
-          window.OneSignalDeferred.push(function(OneSignal) {
-            OneSignal.init({
-              appId: "${appId}",
-              allowLocalhostAsSecureOrigin: true,
-              notifyButton: { enable: false },
-              autoResubscribe: true
-            });
-          });
-        `}
-      </Script>
-    </>
+    <Script
+      id="onesignal-sdk"
+      src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"
+      strategy="afterInteractive"
+    />
   );
 }
