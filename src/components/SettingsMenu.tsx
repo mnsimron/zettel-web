@@ -62,6 +62,10 @@ export function SettingsMenu() {
   };
 
   const handleSignOut = async () => {
+    // Show confirmation modal before signing out
+    const confirmed = window.confirm('Are you sure you want to sign out?');
+    if (!confirmed) return;
+
     try {
       await supabase.auth.signOut();
       if (typeof window !== 'undefined') {

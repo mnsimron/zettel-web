@@ -354,6 +354,64 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     };
   }, [documentId]);
 
+  // Realtime subscription: apply external updates to this document
+  useEffect(() => {
+    if (!documentId) return;
+
+    const channel = supabase
+      .channel(`public:documents:editor:${documentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'documents',
+          filter: `id=eq.${documentId}`,
+        },
+        (payload) => {
+          try {
+            const newDoc = payload.new as DocRow;
+            if (!newDoc) return;
+
+            // Update local document state
+            setDocument((current) => {
+              // If incoming updated_at is newer, replace
+              try {
+                if (!current) return newDoc;
+                const curTime = new Date(current.updated_at).getTime();
+                const newTime = new Date(newDoc.updated_at).getTime();
+                return newTime > curTime ? newDoc : current;
+              } catch {
+                return newDoc;
+              }
+            });
+
+            // If editor exists and the incoming content differs, apply it
+            if (editor) {
+              const incoming = newDoc.content ?? '';
+              const currentHtml = editor.getHTML();
+
+              // Avoid clobbering while the local user is actively editing
+              const edAny = editor as any;
+              const isUserEditing = typeof edAny?.isFocused === 'function' ? edAny.isFocused() : false;
+
+              if (incoming !== currentHtml && !isUserEditing) {
+                // Apply content without emitting an update (prevents save loop)
+                editor.commands.setContent(incoming, { emitUpdate: false });
+              }
+            }
+          } catch (err) {
+            console.error('Realtime payload handling error:', err);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [documentId, editor]);
+
   useEffect(() => {
     let isMounted = true;
 

@@ -166,10 +166,37 @@ export default function LoginPage() {
           success: 'Logged in successfully!',
           error: (err) => getFriendlyAuthError(err instanceof Error ? err.message : 'Authentication failed.'),
         });
-      }
 
-      router.replace('/');
-    } catch (err) {
+        // Ensure Supabase client has the authenticated user before redirecting.
+        // Some environments may not have the session immediately available,
+        // so poll briefly for the user to be present.
+        const waitForUser = async (retries = 10, delayMs = 250) => {
+          for (let i = 0; i < retries; i++) {
+            try {
+              const { data } = await supabase.auth.getUser();
+              if (data?.user) return true;
+            } catch (e) {
+              // ignore and retry
+            }
+            // small delay
+            // eslint-disable-next-line no-await-in-loop
+            await new Promise((r) => setTimeout(r, delayMs));
+          }
+          return false;
+        };
+
+        const hasUser = await waitForUser(12, 300);
+        if (!hasUser) {
+          // If no session yet, do a hard reload which allows server-side to pick up cookie/session.
+          if (typeof window !== 'undefined') {
+            window.location.reload();
+            return;
+          }
+        }
+
+        router.replace('/');
+        }
+      } catch (err) {
       const nextError = err instanceof Error ? getFriendlyAuthError(err.message) : 'Authentication failed.';
       setError(nextError);
       toast.error(nextError);
