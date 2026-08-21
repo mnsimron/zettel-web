@@ -11,7 +11,6 @@ import Collaboration from '@tiptap/extension-collaboration';
 import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { toast } from 'sonner';
-import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Subscript } from '@tiptap/extension-subscript';
@@ -162,6 +161,15 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
   // Yjs document and awareness refs for collaboration
   const ydocRef = useRef<Y.Doc | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
+  // Dynamically load TipTap menu components to avoid duplicate runtime registration
+  const [Menus, setMenus] = useState<{ FloatingMenu?: any; BubbleMenu?: any } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    void import('@tiptap/react/menus')
+      .then((m) => setMenus({ FloatingMenu: m.FloatingMenu, BubbleMenu: m.BubbleMenu }))
+      .catch((err) => console.error('Failed to load TipTap menus dynamically', err));
+  }, []);
 
   // Ensure Y.Doc exists before initializing the editor so Collaboration extension can use it
   if (!ydocRef.current) {
@@ -170,6 +178,16 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
   if (!awarenessRef.current) {
     awarenessRef.current = new Awareness(ydocRef.current);
   }
+
+  // Stable provider object used by CollaborationCursor. Keep fields updated
+  // to avoid the extension reading `provider.doc` when it's undefined.
+  const providerRef = useRef<{ awareness?: Awareness; doc?: Y.Doc }>({
+    awareness: awarenessRef.current ?? undefined,
+    doc: ydocRef.current ?? undefined,
+  });
+  // keep provider fields in sync
+  providerRef.current.awareness = awarenessRef.current ?? undefined;
+  providerRef.current.doc = ydocRef.current ?? undefined;
 
   const insertImageFromUrl = (url: string) => {
     if (!editor || !url.trim()) return;
@@ -180,9 +198,11 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     immediatelyRender: false,
     extensions: [
       // TipTap Yjs collaboration support
-      Collaboration.configure({ document: ydocRef.current }),
+      Collaboration.configure({ document: ydocRef.current ?? new Y.Doc() }),
       CollaborationCursor.configure({
-        provider: awarenessRef.current,
+        // Pass a stable provider object so the extension won't encounter a
+        // briefly-undefined `provider.doc` or `provider.awareness`.
+        provider: providerRef.current,
         // `user` will be overridden by awareness local state; provide a fallback
         user: {
           name: currentUserId ?? 'Guest',
@@ -256,7 +276,9 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         return true;
       },
     },
-    content: document?.content ?? '',
+    // Do NOT set `content` here when using the Collaboration extension —
+    // it clashes with TipTap's Yjs binding. Populate the Yjs doc or set
+    // content programmatically after the editor initializes instead.
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
 
@@ -305,9 +327,14 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
 
   // Setup Yjs <-> Supabase realtime transport
   useEffect(() => {
-    if (!ydocRef.current || !documentId) return;
+    if (!documentId) return;
 
-    const ydoc = ydocRef.current;
+    const ydoc = ydocRef.current ?? new Y.Doc();
+    if (!ydocRef.current) ydocRef.current = ydoc;
+
+    if (!awarenessRef.current) {
+      awarenessRef.current = new Awareness(ydoc);
+    }
     const awareness = awarenessRef.current!;
 
     // set local awareness state (user info)
@@ -343,14 +370,16 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     const onLocalUpdate = (update: Uint8Array, origin: any) => {
       try {
         const encoded = uint8ArrayToBase64(new Uint8Array(update));
-        const clientId = ydoc.clientID;
+        const clientId = ((ydoc as any)?.clientID) ?? null;
         void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: encoded, clientId } });
       } catch (e) {
         console.error('Failed to broadcast Yjs update', e);
       }
     };
 
-    ydoc.on('update', onLocalUpdate);
+    if (ydoc && typeof (ydoc as any).on === 'function') {
+      (ydoc as any).on('update', onLocalUpdate);
+    }
 
     // Broadcast awareness changes when they occur
     const onAwarenessChange = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }) => {
@@ -359,14 +388,16 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         if (changed.length === 0) return;
         const awarenessUpdate = encodeAwarenessUpdate(awareness, changed);
         const encoded = uint8ArrayToBase64(new Uint8Array(awarenessUpdate));
-        const clientId = ydoc.clientID;
+        const clientId = ((ydoc as any)?.clientID) ?? null;
         void channel.send({ type: 'broadcast', event: 'yjs-awareness', payload: { update: encoded, clientId } });
       } catch (e) {
         console.error('Failed to broadcast awareness update', e);
       }
     };
 
-    awareness.on('update', onAwarenessChange as any);
+    if (awareness && typeof (awareness as any).on === 'function') {
+      (awareness as any).on('update', onAwarenessChange as any);
+    }
 
     // Listen for remote updates via Supabase broadcast
     channel.on('broadcast', { event: 'yjs-update' }, (payload) => {
@@ -375,7 +406,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
         if (!encoded) return;
         // Skip applying updates we originated
-        if (senderClientId !== undefined && senderClientId === ydoc.clientID) return;
+        if (senderClientId !== undefined && senderClientId === (((ydoc as any)?.clientID) ?? null)) return;
         const update = base64ToUint8Array(encoded);
         Y.applyUpdate(ydoc, update);
       } catch (e) {
@@ -390,7 +421,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
         if (!encoded) return;
         // Skip processing our own awareness broadcasts
-        if (senderClientId !== undefined && senderClientId === ydoc.clientID) return;
+        if (senderClientId !== undefined && senderClientId === (((ydoc as any)?.clientID) ?? null)) return;
         const update = base64ToUint8Array(encoded);
         applyAwarenessUpdate(awareness, update, /* origin */ null);
       } catch (e) {
@@ -401,8 +432,16 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     void channel.subscribe();
 
     return () => {
-      ydoc.off('update', onLocalUpdate);
-      awareness.off('update', onAwarenessChange as any);
+      try {
+        if (ydoc && typeof (ydoc as any).off === 'function') (ydoc as any).off('update', onLocalUpdate);
+      } catch (e) {
+        // ignore
+      }
+      try {
+        if (awareness && typeof (awareness as any).off === 'function') (awareness as any).off('update', onAwarenessChange as any);
+      } catch (e) {
+        // ignore
+      }
       supabase.removeChannel(channel);
     };
   }, [documentId, currentUserId]);
@@ -440,6 +479,52 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       }
     };
   }, [editor]);
+
+  // Initialize editor / ydoc content once when a document is loaded.
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (!editor || !document) return;
+
+    // Only initialize once per editor mount/document.
+    if (initializedRef.current) return;
+
+    const html = document.content ?? '';
+    if (!html) {
+      initializedRef.current = true;
+      return;
+    }
+
+    // Try to seed the Y.Doc if it's empty. Prefer writing to ydoc where possible;
+    // otherwise fall back to setting editor content which will sync into the ydoc
+    // via the Collaboration extension.
+    try {
+      const ydoc = ydocRef.current;
+      let hasContent = false;
+
+      // If a XmlFragment is present (used by ProseMirror), check children
+      if (ydoc && typeof (ydoc as any).getXmlFragment === 'function') {
+        const xml = (ydoc as any).getXmlFragment('prosemirror');
+        if (xml && typeof (xml as any).toArray === 'function') {
+          hasContent = (xml as any).toArray().length > 0;
+        }
+      }
+
+      if (!hasContent) {
+        // Fall back to setting editor content once; Collaboration will propagate
+        // this into the shared Yjs doc.
+        editor.commands.setContent(html, { emitUpdate: false });
+      }
+    } catch (e) {
+      try {
+        editor.commands.setContent(html, { emitUpdate: false });
+      } catch (err) {
+        console.error('Failed to initialize editor content:', err);
+      }
+    } finally {
+      initializedRef.current = true;
+    }
+  }, [editor, document, documentId]);
 
   const fetchCollaborators = async (targetDocumentId: string) => {
     const { data, error: collaboratorsError } = await supabase
@@ -709,8 +794,9 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     );
   }
 
-  return (
-    <main className="flex flex-1 flex-col overflow-hidden bg-white dark:bg-black">
+  try {
+    return (
+      <main className="flex flex-1 flex-col overflow-hidden bg-white dark:bg-black">
       <header className="border-b border-zinc-200 bg-white/80 px-8 py-4 backdrop-blur-sm dark:border-zinc-800 dark:bg-black/80">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -829,19 +915,20 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
 
           {editor && (
             <>
-              <FloatingMenu
-                editor={editor}
-                shouldShow={({ state }) => {
-                  const { selection } = state;
-                  return selection.empty && selection.$anchor.parent.textContent.length === 0;
-                }}
-                options={{
-                  placement: 'top-start',
-                  offset: { mainAxis: 12 },
-                  strategy: 'absolute',
-                }}
-                className="flex max-w-[min(560px,calc(100vw-3rem))] flex-wrap items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 p-1.5 shadow-lg shadow-zinc-950/30"
-              >
+              {Menus?.FloatingMenu && (
+                <Menus.FloatingMenu
+                  editor={editor}
+                  shouldShow={({ state }: any) => {
+                    const { selection } = state;
+                    return selection.empty && selection.$anchor.parent.textContent.length === 0;
+                  }}
+                  options={{
+                    placement: 'top-start',
+                    offset: { mainAxis: 12 },
+                    strategy: 'absolute',
+                  }}
+                  className="flex max-w-[min(560px,calc(100vw-3rem))] flex-wrap items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 p-1.5 shadow-lg shadow-zinc-950/30"
+                >
                 <div className="relative">
                   <button
                     type="button"
@@ -1018,17 +1105,19 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
                   <ImageIcon className="h-3.5 w-3.5" />
                   <span>Insert Image</span>
                 </button>
-              </FloatingMenu>
+              </Menus.FloatingMenu>
+            )}
 
-              <BubbleMenu
-                editor={editor}
-                options={{
-                  placement: 'top-start',
-                  offset: { mainAxis: 10 },
-                  strategy: 'absolute',
-                }}
-                className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-lg shadow-zinc-950/30"
-              >
+              {Menus?.BubbleMenu && (
+                <Menus.BubbleMenu
+                  editor={editor}
+                  options={{
+                    placement: 'top-start',
+                    offset: { mainAxis: 10 },
+                    strategy: 'absolute',
+                  }}
+                  className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-lg shadow-zinc-950/30"
+                >
                 <ToolbarButton
                   label="Bold"
                   icon={Bold}
@@ -1103,13 +1192,28 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
                 >
                   <Eraser className="h-3.5 w-3.5" />
                 </button>
-              </BubbleMenu>
+                </Menus.BubbleMenu>
+              )}
             </>
           )}
 
-          <EditorContent editor={editor} />
+          {editor ? (
+            <EditorContent editor={editor} />
+          ) : (
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Initializing editor...</p>
+            </div>
+          )}
         </div>
       </div>
-    </main>
-  );
+      </main>
+    );
+  } catch (err) {
+    console.error('Editor render error', err);
+    return (
+      <div className="flex flex-1 items-center justify-center bg-white dark:bg-black">
+        <p className="text-sm text-red-600 dark:text-red-400">Failed to initialize editor.</p>
+      </div>
+    );
+  }
 }

@@ -172,7 +172,7 @@ export default function Home() {
         </div>
 
         {currentDocumentId ? (
-          <Editor documentId={currentDocumentId} onSelectDocument={handleSelectDocument} />
+          <Editor key={currentDocumentId} documentId={currentDocumentId} onSelectDocument={handleSelectDocument} />
         ) : (
           <div className="flex flex-1 items-center justify-center">
             <div className="text-center">
