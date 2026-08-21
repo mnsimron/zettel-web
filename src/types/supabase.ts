@@ -17,7 +17,21 @@ export type Database = {
       [_ in never]: never
     }
     Views: {
-      [_ in never]: never
+      documents_accessible: {
+        Row: {
+          content: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_deleted: boolean | null
+          parent_id: string | null
+          title: string
+          updated_at: string
+          workspace_id: string
+          collaborator_ids: string[]
+        }
+        Relationships: []
+      }
     }
     Functions: {
       graphql: {
@@ -96,6 +110,43 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      documents_accessible: {
+        Row: {
+          content: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_deleted: boolean | null
+          parent_id: string | null
+          title: string
+          updated_at: string
+          workspace_id: string
+          collaborator_ids: string[]
+        }
+        Insert: {
+          content?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_deleted?: boolean | null
+          parent_id?: string | null
+          title?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Update: {
+          content?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_deleted?: boolean | null
+          parent_id?: string | null
+          title?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: []
       }
       document_collaborators: {
         Row: {

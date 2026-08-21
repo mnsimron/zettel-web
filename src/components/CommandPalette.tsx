@@ -5,7 +5,7 @@ import { Search, Command, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
 
-type Document = Database['public']['Tables']['documents']['Row'];
+type Document = Database['public']['Tables']['documents_accessible']['Row'];
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -35,7 +35,7 @@ export default function CommandPalette({
 
       try {
         const { data, error } = await supabase
-          .from('documents')
+          .from('documents_accessible')
           .select()
           .eq('workspace_id', workspaceId)
           .is('parent_id', null)

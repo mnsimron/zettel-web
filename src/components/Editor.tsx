@@ -50,7 +50,8 @@ import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
 import ShareDocumentModal from '@/components/ShareDocumentModal';
 
-type Document = Database['public']['Tables']['documents']['Row'];
+type DocRow = Database['public']['Tables']['documents']['Row'];
+type AccessibleDoc = Database['public']['Tables']['documents_accessible']['Row'];
 
 interface EditorProps {
   documentId: string;
@@ -113,8 +114,8 @@ function FloatingToolbarButton({
 }
 
 export default function Editor({ documentId, onSelectDocument }: EditorProps) {
-  const [document, setDocument] = useState<Document | null>(null);
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [document, setDocument] = useState<DocRow | null>(null);
+  const [documents, setDocuments] = useState<AccessibleDoc[]>([]);
   const [title, setTitle] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -277,7 +278,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       throw collaboratorsError;
     }
 
-    setCollaborators(((data ?? []) as Array<{
+    setCollaborators((data ?? []) as Array<{
       id: string;
       user_id: string;
       role: string;
@@ -286,7 +287,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         email: string;
         full_name?: string | null;
       } | null;
-    }>) ?? []);
+    }>);
   };
 
   useEffect(() => {
@@ -307,11 +308,11 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
 
         if (isCancelled) return;
 
-        setDocument(data);
+        setDocument(data as DocRow);
         setTitle(data.title || '');
 
         const { data: workspaceDocuments, error: workspaceError } = await supabase
-          .from('documents')
+          .from('documents_accessible')
           .select('*')
           .eq('workspace_id', data.workspace_id)
           .order('created_at', { ascending: true });
@@ -319,7 +320,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         if (workspaceError) throw workspaceError;
 
         if (!isCancelled) {
-          setDocuments((workspaceDocuments as Document[]) || []);
+          setDocuments((workspaceDocuments as AccessibleDoc[]) || []);
         }
 
         await fetchCollaborators(data.id);

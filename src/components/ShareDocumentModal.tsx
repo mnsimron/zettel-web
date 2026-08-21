@@ -101,17 +101,33 @@ export default function ShareDocumentModal({
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || 'Failed to send collaboration notification.');
+        // Try to parse JSON error from the API for friendlier messages
+        let body: any = null;
+        try {
+          body = await res.json();
+        } catch (_) {
+          // ignore parse errors
+        }
+
+        const errMsg = body?.error ?? body?.message ?? (await res.text()) ?? 'Failed to send collaboration notification.';
+        throw new Error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
       }
 
       toast.success('Invitation sent!');
       onSuccess?.();
       handleClose();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to send invitation.';
-      setError(message);
-      toast.error(message);
+    } catch (err: unknown) {
+      // Handle Postgres unique-constraint (duplicate collaborator) gracefully
+      if ((err as any)?.code === '23505') {
+        const message = 'This user already has access to this document';
+        setError(message);
+        toast.error(message);
+      } else {
+        const message = err instanceof Error ? err.message : 'Unable to send invitation.';
+        setError(message);
+        toast.error(message);
+      }
+
       console.error('Share document error:', err);
     } finally {
       setIsLoading(false);

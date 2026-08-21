@@ -19,7 +19,7 @@ import type { Database } from '@/types/supabase';
 import { EnableNotificationsButton } from './EnableNotificationsButton';
 import { SettingsMenu } from '@/components/SettingsMenu';
 
-type Document = Database['public']['Tables']['documents']['Row'];
+type Document = Database['public']['Tables']['documents_accessible']['Row'];
 
 type DocumentNode = Document & {
   children: DocumentNode[];
@@ -156,7 +156,7 @@ export default function Sidebar({
 
     try {
       const { data, error: fetchError } = await supabase
-        .from('documents')
+        .from('documents_accessible')
         .select()
         .eq('workspace_id', workspaceId)
         .neq('is_deleted', true)
