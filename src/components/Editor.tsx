@@ -1,6 +1,14 @@
-'use client';
+"use client";
+
+// Note: TipTap's Yjs binding package is `@tiptap/y-tiptap`.
+// If you see build errors about missing `@tiptap/y-tiptap` or `y-prosemirror`,
+// install them as documented in README.md.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import * as Y from 'yjs';
+import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from 'y-protocols/awareness';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { toast } from 'sonner';
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus';
@@ -49,6 +57,22 @@ import {
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/supabase';
 import ShareDocumentModal from '@/components/ShareDocumentModal';
+
+// Helper to base64 encode/decode Uint8Array for transport over Supabase
+function uint8ArrayToBase64(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToUint8Array(b64: string) {
+  const binary = atob(b64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
 
 type DocRow = Database['public']['Tables']['documents']['Row'];
 type AccessibleDoc = Database['public']['Tables']['documents_accessible']['Row'];
@@ -135,6 +159,17 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     } | null;
   }>>([]);
   const saveTimeoutRef = useRef<number | null>(null);
+  // Yjs document and awareness refs for collaboration
+  const ydocRef = useRef<Y.Doc | null>(null);
+  const awarenessRef = useRef<Awareness | null>(null);
+
+  // Ensure Y.Doc exists before initializing the editor so Collaboration extension can use it
+  if (!ydocRef.current) {
+    ydocRef.current = new Y.Doc();
+  }
+  if (!awarenessRef.current) {
+    awarenessRef.current = new Awareness(ydocRef.current);
+  }
 
   const insertImageFromUrl = (url: string) => {
     if (!editor || !url.trim()) return;
@@ -144,6 +179,16 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
+      // TipTap Yjs collaboration support
+      Collaboration.configure({ document: ydocRef.current }),
+      CollaborationCursor.configure({
+        provider: awarenessRef.current,
+        // `user` will be overridden by awareness local state; provide a fallback
+        user: {
+          name: currentUserId ?? 'Guest',
+          color: '#888',
+        },
+      }),
       StarterKit,
       Subscript,
       Superscript,
@@ -257,6 +302,144 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       }, 1000);
     },
   });
+
+  // Setup Yjs <-> Supabase realtime transport
+  useEffect(() => {
+    if (!ydocRef.current || !documentId) return;
+
+    const ydoc = ydocRef.current;
+    const awareness = awarenessRef.current!;
+
+    // set local awareness state (user info)
+    const setLocalAwareness = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        const id = user?.id ?? currentUserId ?? 'anon';
+        const name = user?.email ?? id;
+        const color = `#${Math.floor(Math.abs(hashCode(id)) % 0xffffff).toString(16).padStart(6, '0')}`;
+        awareness.setLocalStateField('user', { id, name, color });
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    setLocalAwareness();
+
+    // hash helper
+    function hashCode(str: string) {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) {
+        h = (h << 5) - h + str.charCodeAt(i);
+        h |= 0;
+      }
+      return h;
+    }
+
+    // Supabase channel for document Yjs messages
+    const channelName = `realtime:yjs:documents:${documentId}`;
+    const channel = supabase.channel(channelName);
+
+    // Broadcast local ydoc updates to others (the `update` argument is incremental)
+    const onLocalUpdate = (update: Uint8Array, origin: any) => {
+      try {
+        const encoded = uint8ArrayToBase64(new Uint8Array(update));
+        const clientId = ydoc.clientID;
+        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: encoded, clientId } });
+      } catch (e) {
+        console.error('Failed to broadcast Yjs update', e);
+      }
+    };
+
+    ydoc.on('update', onLocalUpdate);
+
+    // Broadcast awareness changes when they occur
+    const onAwarenessChange = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }) => {
+      try {
+        const changed = added.concat(updated).concat(removed || []);
+        if (changed.length === 0) return;
+        const awarenessUpdate = encodeAwarenessUpdate(awareness, changed);
+        const encoded = uint8ArrayToBase64(new Uint8Array(awarenessUpdate));
+        const clientId = ydoc.clientID;
+        void channel.send({ type: 'broadcast', event: 'yjs-awareness', payload: { update: encoded, clientId } });
+      } catch (e) {
+        console.error('Failed to broadcast awareness update', e);
+      }
+    };
+
+    awareness.on('update', onAwarenessChange as any);
+
+    // Listen for remote updates via Supabase broadcast
+    channel.on('broadcast', { event: 'yjs-update' }, (payload) => {
+      try {
+        const encoded = payload.payload?.update ?? payload.update ?? null;
+        const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
+        if (!encoded) return;
+        // Skip applying updates we originated
+        if (senderClientId !== undefined && senderClientId === ydoc.clientID) return;
+        const update = base64ToUint8Array(encoded);
+        Y.applyUpdate(ydoc, update);
+      } catch (e) {
+        console.error('Failed to apply remote Yjs update', e);
+      }
+    });
+
+    // Awareness updates: receive remote awareness and apply
+    channel.on('broadcast', { event: 'yjs-awareness' }, (payload) => {
+      try {
+        const encoded = payload.payload?.update ?? payload.update ?? null;
+        const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
+        if (!encoded) return;
+        // Skip processing our own awareness broadcasts
+        if (senderClientId !== undefined && senderClientId === ydoc.clientID) return;
+        const update = base64ToUint8Array(encoded);
+        applyAwarenessUpdate(awareness, update, /* origin */ null);
+      } catch (e) {
+        console.error('Failed to apply remote awareness update', e);
+      }
+    });
+
+    void channel.subscribe();
+
+    return () => {
+      ydoc.off('update', onLocalUpdate);
+      awareness.off('update', onAwarenessChange as any);
+      supabase.removeChannel(channel);
+    };
+  }, [documentId, currentUserId]);
+
+  // Update awareness selection whenever the editor selection changes
+  useEffect(() => {
+    if (!editor || !awarenessRef.current) return;
+    const awareness = awarenessRef.current;
+    const edAny = editor as any;
+
+    const updateSelectionAwareness = () => {
+      try {
+        const sel = editor.state.selection;
+        const anchor = (sel as any).anchor ?? (sel as any).from ?? null;
+        const head = (sel as any).head ?? (sel as any).to ?? null;
+        awareness.setLocalStateField('selection', { anchor, head });
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    // Try to hook into TipTap selection/transaction events
+    if (typeof edAny.on === 'function') {
+      edAny.on('selectionUpdate', updateSelectionAwareness);
+      edAny.on('transaction', updateSelectionAwareness);
+    }
+
+    // also update once immediately
+    updateSelectionAwareness();
+
+    return () => {
+      if (typeof edAny.off === 'function') {
+        edAny.off('selectionUpdate', updateSelectionAwareness);
+        edAny.off('transaction', updateSelectionAwareness);
+      }
+    };
+  }, [editor]);
 
   const fetchCollaborators = async (targetDocumentId: string) => {
     const { data, error: collaboratorsError } = await supabase
