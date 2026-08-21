@@ -83,8 +83,7 @@ export async function getDefaultWorkspaceId(userId?: string): Promise<string> {
     // Step 3: Create new workspace for this user
     const { data: workspace, error: workspaceError } = await supabase
       .from('workspaces')
-      // Cast to any to avoid generated DB types rejecting additional RLS/owner column
-      .insert([{ name: 'My Workspace', user_id: userId } as any])
+      .insert([{ name: 'My Workspace' }])
       .select('id')
       .single();
 
