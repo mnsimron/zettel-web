@@ -34,12 +34,23 @@ export default function CommandPalette({
       setIsLoading(true);
 
       try {
-        const { data, error } = await supabase
-          .from('documents_accessible')
-          .select()
-          .eq('workspace_id', workspaceId)
-          .is('parent_id', null)
-          .order('created_at', { ascending: false });
+        const user = (await supabase.auth.getUser()).data.user;
+        const userId = user?.id;
+
+        console.log('CommandPalette.fetchDocuments input', { workspaceId, userId });
+
+        let query = supabase.from('documents_accessible').select().is('parent_id', null);
+
+        if (userId) {
+          const orFilter = `workspace_id.eq.${workspaceId},collaborator_ids.cs.{${userId}}`;
+          query = query.or(orFilter).order('created_at', { ascending: false });
+        } else {
+          query = query.eq('workspace_id', workspaceId).order('created_at', { ascending: false });
+        }
+
+        const { data, error } = await query;
+
+        console.log('CommandPalette.fetchDocuments result', { data, error });
 
         if (error) throw error;
         setDocuments(data || []);

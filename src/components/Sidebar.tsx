@@ -155,12 +155,26 @@ export default function Sidebar({
     setError(null);
 
     try {
-      const { data, error: fetchError } = await supabase
-        .from('documents_accessible')
-        .select()
-        .eq('workspace_id', workspaceId)
-        .neq('is_deleted', true)
-        .order('title', { ascending: true });
+      // Include documents in the current workspace OR documents shared with the
+      // current user (collaborator) which may live in other workspaces.
+      const userIdValue = userId ?? (await supabase.auth.getUser()).data.user?.id;
+
+      console.log('fetchDocuments input', { workspaceId, userId: userIdValue });
+
+      let query = supabase.from('documents_accessible').select().neq('is_deleted', true);
+
+      if (userIdValue) {
+        // Use an OR filter: workspace OR collaborator membership
+        // PostgREST/ Supabase `.or()` accepts a comma-separated list of filters
+        const orFilter = `workspace_id.eq.${workspaceId},collaborator_ids.cs.{${userIdValue}}`;
+        query = query.or(orFilter).order('title', { ascending: true });
+      } else {
+        query = query.eq('workspace_id', workspaceId).order('title', { ascending: true });
+      }
+
+      const { data, error: fetchError } = await query;
+
+      console.log('fetchDocuments result', { data, fetchError });
 
       if (fetchError) {
         throw fetchError;

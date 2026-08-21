@@ -311,11 +311,23 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         setDocument(data as DocRow);
         setTitle(data.title || '');
 
-        const { data: workspaceDocuments, error: workspaceError } = await supabase
-          .from('documents_accessible')
-          .select('*')
-          .eq('workspace_id', data.workspace_id)
-          .order('created_at', { ascending: true });
+        // Include documents in the same workspace or documents shared with the current user
+        const user = (await supabase.auth.getUser()).data.user;
+        const userId = user?.id ?? currentUserId;
+
+        console.log('Editor.fetchWorkspaceDocuments input', { workspace_id: data.workspace_id, userId });
+
+        let workspaceQuery = supabase.from('documents_accessible').select('*').order('created_at', { ascending: true });
+        if (userId) {
+          const orFilter = `workspace_id.eq.${data.workspace_id},collaborator_ids.cs.{${userId}}`;
+          workspaceQuery = workspaceQuery.or(orFilter);
+        } else {
+          workspaceQuery = workspaceQuery.eq('workspace_id', data.workspace_id);
+        }
+
+        const { data: workspaceDocuments, error: workspaceError } = await workspaceQuery;
+
+        console.log('Editor.fetchWorkspaceDocuments result', { workspaceDocuments, workspaceError });
 
         if (workspaceError) throw workspaceError;
 
