@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY;
     const ONESIGNAL_APP_ID = process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID || process.env.ONESIGNAL_APP_ID;
 
-    if (!ONESIGNAL_REST_API_KEY) {
+    if (!ONESIGNAL_REST_API_KEY || !String(ONESIGNAL_REST_API_KEY).trim()) {
       console.error('ONESIGNAL_REST_API_KEY is not set');
       return NextResponse.json({ error: 'Server misconfiguration: missing OneSignal REST key' }, { status: 500 });
     }
@@ -27,6 +27,15 @@ export async function POST(request: Request) {
     if (!ONESIGNAL_APP_ID) {
       console.error('ONESIGNAL_APP_ID is not set');
       return NextResponse.json({ error: 'Server misconfiguration: missing OneSignal App ID' }, { status: 500 });
+    }
+
+    const restKey = String(ONESIGNAL_REST_API_KEY).trim();
+    if (!restKey.startsWith('os_') && !restKey.startsWith('Basic ')) {
+      console.error('ONESIGNAL_REST_API_KEY format looks invalid', { keyPrefix: restKey.slice(0, 12) });
+      return NextResponse.json(
+        { error: 'Server misconfiguration: OneSignal REST API key has an invalid format.' },
+        { status: 500 }
+      );
     }
 
     const payload = {
@@ -38,8 +47,6 @@ export async function POST(request: Request) {
     };
 
     // 4. Send to OneSignal with the exact Authorization header they expect
-    const restKey = String(ONESIGNAL_REST_API_KEY).trim();
-
     const response = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
       headers: {

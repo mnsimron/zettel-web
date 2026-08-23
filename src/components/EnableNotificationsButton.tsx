@@ -129,14 +129,21 @@ export function EnableNotificationsButton() {
               if (settled) return;
               console.debug('[EnableNotificationsButton] OneSignal instance received');
 
-              if (oneSignal.init) {
+              const win = window as OneSignalWindow & { OneSignalInitialized?: boolean };
+              if (oneSignal.init && !win.OneSignalInitialized) {
                 console.debug('[EnableNotificationsButton] Initializing OneSignal');
-                await oneSignal.init({
-                  appId,
-                  notifyButton: { enable: false },
-                  allowLocalhostAsSecureOrigin: true,
-                  autoResubscribe: true,
-                });
+                win.OneSignalInitialized = true;
+                try {
+                  await oneSignal.init({
+                    appId,
+                    notifyButton: { enable: false },
+                    allowLocalhostAsSecureOrigin: true,
+                    autoResubscribe: true,
+                  });
+                } catch (initError) {
+                  win.OneSignalInitialized = false;
+                  throw initError;
+                }
               }
 
               if (settled) return;

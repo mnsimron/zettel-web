@@ -33,12 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body suppressHydrationWarning={true} className="min-h-full flex flex-col">
         <HydrationFix />
-
-        <Script 
-          src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" 
-          strategy="afterInteractive" 
-        />
-        <OneSignalProvider />        
+        <OneSignalProvider />
         {children}
         <Toaster richColors position="top-right" closeButton />
       </body>

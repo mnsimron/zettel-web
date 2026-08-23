@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from 'y-protocols/awareness';
 import Collaboration from '@tiptap/extension-collaboration';
-import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
+import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { toast } from 'sonner';
 import StarterKit from '@tiptap/starter-kit';
@@ -199,7 +199,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     extensions: [
       // TipTap Yjs collaboration support
       Collaboration.configure({ document: ydocRef.current ?? new Y.Doc() }),
-      CollaborationCursor.configure({
+      CollaborationCaret.configure({
         // Pass a stable provider object so the extension won't encounter a
         // briefly-undefined `provider.doc` or `provider.awareness`.
         provider: providerRef.current,
