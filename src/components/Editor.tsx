@@ -367,7 +367,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
 
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
-    const channel = supabase.channel(channelName);
+    const channel = supabase.channel(channelName, { config: { broadcast: { ack: false } } });
     const remoteOrigin = 'supabase-remote';
     const clientId = ((ydoc as any)?.clientID) ?? null;
     const sentUpdates = new Set<string>();
@@ -375,15 +375,33 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     let pendingAwarenessUpdate: Uint8Array | null = null;
     let retryTimer: number | null = null;
     let disposed = false;
+    let channelStatus = 'CLOSED';
+
+    const sendYjsState = (event: 'yjs-update' | 'request-sync') => {
+      if (disposed || channelStatus !== 'SUBSCRIBED') return;
+
+      const update = Y.encodeStateAsUpdate(ydoc);
+      if (update.byteLength === 0) return;
+
+      const encoded = uint8ArrayToBase64(update);
+      void channel.send({
+        type: 'broadcast',
+        event,
+        payload: event === 'yjs-update' ? { update: encoded, clientId, fullState: true } : { clientId },
+      }).catch((error: unknown) => {
+        console.warn(`[Yjs] Failed to send ${event}`, error);
+      });
+    };
 
     const sendAwarenessUpdate = () => {
       awarenessTimer = null;
-      if (disposed || !pendingAwarenessUpdate || pendingAwarenessUpdate.byteLength === 0) return;
+      if (disposed || channelStatus !== 'SUBSCRIBED' || !pendingAwarenessUpdate || pendingAwarenessUpdate.byteLength === 0) return;
 
       const update = pendingAwarenessUpdate;
       pendingAwarenessUpdate = null;
       const encoded = uint8ArrayToBase64(update);
-      void channel.send({ type: 'broadcast', event: 'yjs-awareness', payload: { update: encoded, clientId } });
+      void channel.send({ type: 'broadcast', event: 'yjs-awareness', payload: { update: encoded, clientId } })
+        .catch((error: unknown) => console.warn('[Yjs] Failed to send awareness update', error));
     };
 
     const scheduleAwarenessUpdate = (update: Uint8Array) => {
@@ -398,6 +416,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     // Broadcast local ydoc updates to others (the `update` argument is incremental)
     const onLocalUpdate = (update: Uint8Array, origin: unknown) => {
       if (origin === remoteOrigin || update.byteLength === 0 || disposed) return;
+      if (channelStatus !== 'SUBSCRIBED') return;
 
       try {
         const encoded = uint8ArrayToBase64(new Uint8Array(update));
@@ -407,7 +426,8 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
           const oldest = sentUpdates.values().next().value;
           if (oldest) sentUpdates.delete(oldest);
         }
-        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: encoded, clientId } });
+        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: encoded, clientId } })
+          .catch((error: unknown) => console.warn('[Yjs] Failed to send update', error));
       } catch (e) {
         console.error('Failed to broadcast Yjs update', e);
       }
@@ -454,6 +474,16 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       }
     });
 
+    channel.on('broadcast', { event: 'request-sync' }, (payload) => {
+      try {
+        const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
+        if (senderClientId !== undefined && senderClientId === clientId) return;
+        sendYjsState('yjs-update');
+      } catch (e) {
+        console.error('Failed to respond to Yjs sync request', e);
+      }
+    });
+
     // Awareness updates: receive remote awareness and apply
     channel.on('broadcast', { event: 'yjs-awareness' }, (payload) => {
       try {
@@ -471,11 +501,19 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     });
 
     const handleChannelStatus = (status: string) => {
+      channelStatus = status;
+
       if (status === 'SUBSCRIBED') {
         console.info(`[Yjs] Realtime channel subscribed: ${channelName}`);
         if (retryTimer !== null) {
           window.clearTimeout(retryTimer);
           retryTimer = null;
+        }
+        // Exchange complete state on every connection to cover missed updates.
+        sendYjsState('yjs-update');
+        if (!disposed) {
+          void channel.send({ type: 'broadcast', event: 'request-sync', payload: { clientId } })
+            .catch((error: unknown) => console.warn('[Yjs] Failed to request initial sync', error));
         }
         return;
       }
@@ -495,6 +533,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
 
     return () => {
       disposed = true;
+      channelStatus = 'CLOSED';
       if (awarenessTimer !== null) window.clearTimeout(awarenessTimer);
       if (retryTimer !== null) window.clearTimeout(retryTimer);
       try {
