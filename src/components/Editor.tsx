@@ -158,6 +158,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     } | null;
   }>>([]);
   const saveTimeoutRef = useRef<number | null>(null);
+  const remoteUpdateRef = useRef(false);
   // Yjs document and awareness refs for collaboration
   const ydocRef = useRef<Y.Doc | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
@@ -279,7 +280,9 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     // Do NOT set `content` here when using the Collaboration extension —
     // it clashes with TipTap's Yjs binding. Populate the Yjs doc or set
     // content programmatically after the editor initializes instead.
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
+      if (remoteUpdateRef.current || transaction.getMeta('supabase-remote')) return;
+
       const html = editor.getHTML();
 
       if (saveTimeoutRef.current) {
@@ -365,7 +368,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
     const channel = supabase.channel(channelName);
-    const remoteOrigin = { source: 'supabase-realtime' };
+    const remoteOrigin = 'supabase-remote';
     const clientId = ((ydoc as any)?.clientID) ?? null;
     const sentUpdates = new Set<string>();
     let awarenessTimer: number | null = null;
@@ -440,7 +443,12 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         if (senderClientId !== undefined && senderClientId === clientId) return;
         const update = base64ToUint8Array(encoded);
         if (update.byteLength === 0) return;
-        Y.applyUpdate(ydoc, update, remoteOrigin);
+        remoteUpdateRef.current = true;
+        try {
+          Y.applyUpdate(ydoc, update, remoteOrigin);
+        } finally {
+          remoteUpdateRef.current = false;
+        }
       } catch (e) {
         console.error('Failed to apply remote Yjs update', e);
       }
@@ -689,33 +697,19 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
             const newDoc = payload.new as DocRow;
             if (!newDoc) return;
 
-            // Update local document state
+            // Postgres is metadata-only for collaborative document content.
             setDocument((current) => {
-              // If incoming updated_at is newer, replace
               try {
                 if (!current) return newDoc;
                 const curTime = new Date(current.updated_at).getTime();
                 const newTime = new Date(newDoc.updated_at).getTime();
-                return newTime > curTime ? newDoc : current;
+                return newTime > curTime
+                  ? { ...current, title: newDoc.title, updated_at: newDoc.updated_at }
+                  : current;
               } catch {
-                return newDoc;
+                return current ? { ...current, title: newDoc.title, updated_at: newDoc.updated_at } : newDoc;
               }
             });
-
-            // If editor exists and the incoming content differs, apply it
-            if (editor) {
-              const incoming = newDoc.content ?? '';
-              const currentHtml = editor.getHTML();
-
-              // Avoid clobbering while the local user is actively editing
-              const edAny = editor as any;
-              const isUserEditing = typeof edAny?.isFocused === 'function' ? edAny.isFocused() : false;
-
-              if (incoming !== currentHtml && !isUserEditing) {
-                // Apply content without emitting an update (prevents save loop)
-                editor.commands.setContent(incoming, { emitUpdate: false });
-              }
-            }
           } catch (err) {
             console.error('Realtime payload handling error:', err);
           }
