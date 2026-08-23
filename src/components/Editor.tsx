@@ -480,13 +480,11 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     };
   }, [editor]);
 
-  // Initialize editor / ydoc content once when a document is loaded.
+  // Hydrate the Yjs document only once when the fetched Supabase document is empty.
   const initializedRef = useRef(false);
 
   useEffect(() => {
     if (!editor || !document) return;
-
-    // Only initialize once per editor mount/document.
     if (initializedRef.current) return;
 
     const html = document.content ?? '';
@@ -495,32 +493,19 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       return;
     }
 
-    // Try to seed the Y.Doc if it's empty. Prefer writing to ydoc where possible;
-    // otherwise fall back to setting editor content which will sync into the ydoc
-    // via the Collaboration extension.
     try {
       const ydoc = ydocRef.current;
-      let hasContent = false;
+      const xml = ydoc && typeof (ydoc as any).getXmlFragment === 'function'
+        ? (ydoc as any).getXmlFragment('prosemirror')
+        : null;
 
-      // If a XmlFragment is present (used by ProseMirror), check children
-      if (ydoc && typeof (ydoc as any).getXmlFragment === 'function') {
-        const xml = (ydoc as any).getXmlFragment('prosemirror');
-        if (xml && typeof (xml as any).toArray === 'function') {
-          hasContent = (xml as any).toArray().length > 0;
-        }
-      }
+      const yjsHasContent = !!xml && typeof (xml as any).toArray === 'function' && (xml as any).toArray().length > 0;
 
-      if (!hasContent) {
-        // Fall back to setting editor content once; Collaboration will propagate
-        // this into the shared Yjs doc.
+      if (!yjsHasContent) {
         editor.commands.setContent(html, { emitUpdate: false });
       }
     } catch (e) {
-      try {
-        editor.commands.setContent(html, { emitUpdate: false });
-      } catch (err) {
-        console.error('Failed to initialize editor content:', err);
-      }
+      console.error('Failed to hydrate collaboration document from Supabase:', e);
     } finally {
       initializedRef.current = true;
     }
@@ -701,15 +686,6 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       isMounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (!editor || !document) return;
-
-    const html = document.content ?? '';
-    if (editor.getHTML() !== html) {
-      editor.commands.setContent(html, { emitUpdate: false });
-    }
-  }, [editor, document]);
 
   useEffect(() => {
     if (!document) return;
