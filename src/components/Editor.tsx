@@ -367,7 +367,10 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
 
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
-    const channel = supabase.channel(channelName, { config: { broadcast: { ack: false } } });
+    console.log('📡 [Yjs] Connecting to channel:', channelName);
+    const channel = supabase.channel(channelName, {
+      config: { broadcast: { ack: true, self: false } },
+    });
     const remoteOrigin = 'supabase-remote';
     const clientId = ((ydoc as any)?.clientID) ?? null;
     const sentUpdates = new Set<string>();
