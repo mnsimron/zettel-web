@@ -179,7 +179,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     awarenessRef.current = new Awareness(ydocRef.current);
   }
 
-  // Stable provider object used by CollaborationCursor. Keep fields updated
+  // Stable provider object used by CollaborationCaret. Keep fields updated
   // to avoid the extension reading `provider.doc` when it's undefined.
   const providerRef = useRef<{ awareness?: Awareness; doc?: Y.Doc }>({
     awareness: awarenessRef.current ?? undefined,
@@ -365,12 +365,45 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
     const channel = supabase.channel(channelName);
+    const remoteOrigin = { source: 'supabase-realtime' };
+    const clientId = ((ydoc as any)?.clientID) ?? null;
+    const sentUpdates = new Set<string>();
+    let awarenessTimer: number | null = null;
+    let pendingAwarenessUpdate: Uint8Array | null = null;
+    let retryTimer: number | null = null;
+    let disposed = false;
+
+    const sendAwarenessUpdate = () => {
+      awarenessTimer = null;
+      if (disposed || !pendingAwarenessUpdate || pendingAwarenessUpdate.byteLength === 0) return;
+
+      const update = pendingAwarenessUpdate;
+      pendingAwarenessUpdate = null;
+      const encoded = uint8ArrayToBase64(update);
+      void channel.send({ type: 'broadcast', event: 'yjs-awareness', payload: { update: encoded, clientId } });
+    };
+
+    const scheduleAwarenessUpdate = (update: Uint8Array) => {
+      if (update.byteLength === 0 || disposed) return;
+      pendingAwarenessUpdate = update;
+
+      if (awarenessTimer === null) {
+        awarenessTimer = window.setTimeout(sendAwarenessUpdate, 40);
+      }
+    };
 
     // Broadcast local ydoc updates to others (the `update` argument is incremental)
-    const onLocalUpdate = (update: Uint8Array, origin: any) => {
+    const onLocalUpdate = (update: Uint8Array, origin: unknown) => {
+      if (origin === remoteOrigin || update.byteLength === 0 || disposed) return;
+
       try {
         const encoded = uint8ArrayToBase64(new Uint8Array(update));
-        const clientId = ((ydoc as any)?.clientID) ?? null;
+        if (sentUpdates.has(encoded)) return;
+        sentUpdates.add(encoded);
+        if (sentUpdates.size > 100) {
+          const oldest = sentUpdates.values().next().value;
+          if (oldest) sentUpdates.delete(oldest);
+        }
         void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: encoded, clientId } });
       } catch (e) {
         console.error('Failed to broadcast Yjs update', e);
@@ -387,9 +420,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         const changed = added.concat(updated).concat(removed || []);
         if (changed.length === 0) return;
         const awarenessUpdate = encodeAwarenessUpdate(awareness, changed);
-        const encoded = uint8ArrayToBase64(new Uint8Array(awarenessUpdate));
-        const clientId = ((ydoc as any)?.clientID) ?? null;
-        void channel.send({ type: 'broadcast', event: 'yjs-awareness', payload: { update: encoded, clientId } });
+        scheduleAwarenessUpdate(new Uint8Array(awarenessUpdate));
       } catch (e) {
         console.error('Failed to broadcast awareness update', e);
       }
@@ -406,9 +437,10 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
         if (!encoded) return;
         // Skip applying updates we originated
-        if (senderClientId !== undefined && senderClientId === (((ydoc as any)?.clientID) ?? null)) return;
+        if (senderClientId !== undefined && senderClientId === clientId) return;
         const update = base64ToUint8Array(encoded);
-        Y.applyUpdate(ydoc, update);
+        if (update.byteLength === 0) return;
+        Y.applyUpdate(ydoc, update, remoteOrigin);
       } catch (e) {
         console.error('Failed to apply remote Yjs update', e);
       }
@@ -421,17 +453,42 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
         if (!encoded) return;
         // Skip processing our own awareness broadcasts
-        if (senderClientId !== undefined && senderClientId === (((ydoc as any)?.clientID) ?? null)) return;
+        if (senderClientId !== undefined && senderClientId === clientId) return;
         const update = base64ToUint8Array(encoded);
+        if (update.byteLength === 0) return;
         applyAwarenessUpdate(awareness, update, /* origin */ null);
       } catch (e) {
         console.error('Failed to apply remote awareness update', e);
       }
     });
 
-    void channel.subscribe();
+    const handleChannelStatus = (status: string) => {
+      if (status === 'SUBSCRIBED') {
+        console.info(`[Yjs] Realtime channel subscribed: ${channelName}`);
+        if (retryTimer !== null) {
+          window.clearTimeout(retryTimer);
+          retryTimer = null;
+        }
+        return;
+      }
+
+      if (status === 'CHANNEL_ERROR' || status === 'CLOSED' || status === 'TIMED_OUT') {
+        console.warn(`[Yjs] Realtime channel ${status.toLowerCase()}: ${channelName}`);
+        if (!disposed && retryTimer === null) {
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            if (!disposed) void channel.subscribe(handleChannelStatus);
+          }, 1000);
+        }
+      }
+    };
+
+    void channel.subscribe(handleChannelStatus);
 
     return () => {
+      disposed = true;
+      if (awarenessTimer !== null) window.clearTimeout(awarenessTimer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
       try {
         if (ydoc && typeof (ydoc as any).off === 'function') (ydoc as any).off('update', onLocalUpdate);
       } catch (e) {
@@ -451,8 +508,12 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     if (!editor || !awarenessRef.current) return;
     const awareness = awarenessRef.current;
     const edAny = editor as any;
+    let selectionFrame: number | null = null;
 
     const updateSelectionAwareness = () => {
+      if (selectionFrame !== null) return;
+      selectionFrame = window.requestAnimationFrame(() => {
+        selectionFrame = null;
       try {
         const sel = editor.state.selection;
         const anchor = (sel as any).anchor ?? (sel as any).from ?? null;
@@ -461,6 +522,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       } catch (e) {
         // ignore
       }
+      });
     };
 
     // Try to hook into TipTap selection/transaction events
@@ -473,6 +535,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     updateSelectionAwareness();
 
     return () => {
+      if (selectionFrame !== null) window.cancelAnimationFrame(selectionFrame);
       if (typeof edAny.off === 'function') {
         edAny.off('selectionUpdate', updateSelectionAwareness);
         edAny.off('transaction', updateSelectionAwareness);
