@@ -210,7 +210,8 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
           color: '#888',
         },
       }),
-      StarterKit,
+      // Cast configure to any to allow disabling history even if TS types don't expose 'history'
+      (StarterKit.configure as any)({ history: false }),
       Subscript,
       Superscript,
       TextStyle,
@@ -386,11 +387,11 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       const update = Y.encodeStateAsUpdate(ydoc);
       if (update.byteLength === 0) return;
 
-      const encoded = uint8ArrayToBase64(update);
+      const arr = Array.from(update);
       void channel.send({
         type: 'broadcast',
         event,
-        payload: event === 'yjs-update' ? { update: encoded, clientId, fullState: true } : { clientId },
+        payload: event === 'yjs-update' ? { update: arr, clientId, fullState: true } : { clientId },
       }).catch((error: unknown) => {
         console.warn(`[Yjs] Failed to send ${event}`, error);
       });
@@ -422,14 +423,15 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       if (channelStatus !== 'SUBSCRIBED') return;
 
       try {
-        const encoded = uint8ArrayToBase64(new Uint8Array(update));
-        if (sentUpdates.has(encoded)) return;
-        sentUpdates.add(encoded);
+        const arr = Array.from(update);
+        const key = JSON.stringify(arr);
+        if (sentUpdates.has(key)) return;
+        sentUpdates.add(key);
         if (sentUpdates.size > 100) {
           const oldest = sentUpdates.values().next().value;
           if (oldest) sentUpdates.delete(oldest);
         }
-        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: encoded, clientId } })
+        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: arr, clientId } })
           .catch((error: unknown) => console.warn('[Yjs] Failed to send update', error));
       } catch (e) {
         console.error('Failed to broadcast Yjs update', e);
@@ -459,12 +461,12 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
     // Listen for remote updates via Supabase broadcast
     channel.on('broadcast', { event: 'yjs-update' }, (payload) => {
       try {
-        const encoded = payload.payload?.update ?? payload.update ?? null;
+        const arr = payload.payload?.update ?? payload.update ?? null;
         const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
-        if (!encoded) return;
+        if (!arr) return;
         // Skip applying updates we originated
         if (senderClientId !== undefined && senderClientId === clientId) return;
-        const update = base64ToUint8Array(encoded);
+        const update = new Uint8Array(arr as number[]);
         if (update.byteLength === 0) return;
         remoteUpdateRef.current = true;
         try {
