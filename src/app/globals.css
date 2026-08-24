@@ -25,28 +25,31 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* TipTap Collaboration Caret & Selection CSS */
-.tiptap .collaboration-cursor__caret {
-  border-left: 1px solid #0D0D0D;
-  border-right: 1px solid #0D0D0D;
-  margin-left: -1px;
-  margin-right: -1px;
-  pointer-events: none;
-  position: relative;
-  word-break: normal;
+/* --- TipTap Collaboration Cursor Override --- */
+.prose .collaboration-cursor__caret {
+  position: relative !important;
+  display: inline !important; /* Memaksa kursor tidak memutus baris teks */
+  margin-left: -1px !important;
+  margin-right: -1px !important;
+  border-left: 1px solid #0D0D0D !important;
+  border-right: 1px solid #0D0D0D !important;
+  word-break: normal !important;
+  pointer-events: none !important;
+  background-color: transparent !important;
 }
 
-.tiptap .collaboration-cursor__label {
-  border-radius: 3px 3px 3px 0;
-  color: #FFF;
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 600;
-  left: -1px;
-  line-height: normal;
-  padding: 0.1rem 0.3rem;
-  position: absolute;
-  top: -1.4em;
-  user-select: none;
-  white-space: nowrap;
+.prose .collaboration-cursor__label {
+  position: absolute !important;
+  top: -1.5em !important;
+  left: -1px !important;
+  font-size: 12px !important;
+  font-style: normal !important;
+  font-weight: 600 !important;
+  line-height: normal !important;
+  user-select: none !important;
+  color: #FFF !important;
+  padding: 0.1rem 0.3rem !important;
+  border-radius: 3px 3px 3px 0 !important;
+  white-space: nowrap !important;
+  display: block !important;
 }
