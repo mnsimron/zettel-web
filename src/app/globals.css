@@ -25,20 +25,24 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* --- TipTap Collaboration Cursor Override --- */
-.prose .collaboration-cursor__caret {
-  position: relative !important;
-  display: inline !important; /* Memaksa kursor tidak memutus baris teks */
+/* --- TipTap Collaboration Cursor Override (Bulletproof) --- */
+.ProseMirror .collaboration-cursor__caret,
+.tiptap .collaboration-cursor__caret {
+  position: absolute !important;
+  display: inline-block !important;
+  width: 2px !important;
   margin-left: -1px !important;
   margin-right: -1px !important;
-  border-left: 1px solid #0D0D0D !important;
-  border-right: 1px solid #0D0D0D !important;
+  border-left: none !important;
+  border-right: none !important;
+  background-color: currentColor !important;
   word-break: normal !important;
   pointer-events: none !important;
-  background-color: transparent !important;
+  z-index: 50 !important;
 }
 
-.prose .collaboration-cursor__label {
+.ProseMirror .collaboration-cursor__label,
+.tiptap .collaboration-cursor__label {
   position: absolute !important;
   top: -1.5em !important;
   left: -1px !important;
@@ -52,4 +56,5 @@ body {
   border-radius: 3px 3px 3px 0 !important;
   white-space: nowrap !important;
   display: block !important;
+  z-index: 51 !important;
 }

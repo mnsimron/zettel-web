@@ -532,46 +532,47 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
 
   // Hydrate the local caret identity after Supabase auth and profile data load.
   useEffect(() => {
-    let isCancelled = false;
+  let isCancelled = false;
 
-    const hydrateAwarenessUser = async () => {
-      const awareness = awarenessRef.current;
-      if (!awareness) return;
+  const hydrateAwarenessUser = async () => {
+    const awareness = awarenessRef.current;
+    if (!awareness) return;
 
-      try {
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError || !user || isCancelled) return;
+    try {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle();
+      if (error || !user || isCancelled) return;
 
-        if (isCancelled) return;
+      const displayName = user.email?.split('@')[0]?.trim() || user.id;
 
-        const emailName = user.email?.split('@')[0]?.trim();
-        const name = profile?.full_name?.trim() || emailName || user.id;
-        let hash = 0;
-        for (let index = 0; index < user.id.length; index++) {
-          hash = (hash << 5) - hash + user.id.charCodeAt(index);
-          hash |= 0;
-        }
-        const color = `#${(Math.abs(hash) % 0xffffff).toString(16).padStart(6, '0')}`;
-
-        awareness.setLocalStateField('user', { id: user.id, name, color });
-        if (currentUserId !== user.id) setCurrentUserId(user.id);
-      } catch {
-        // Auth may still be initializing; the effect will retry when the user id changes.
+      let hash = 0;
+      for (let index = 0; index < user.id.length; index++) {
+        hash = (hash << 5) - hash + user.id.charCodeAt(index);
+        hash |= 0;
       }
-    };
 
-    void hydrateAwarenessUser();
+      const generatedColor = `#${(Math.abs(hash) % 0xffffff)
+        .toString(16)
+        .padStart(6, '0')}`;
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [currentUserId]);
+      awareness.setLocalStateField('user', {
+        name: displayName,
+        color: generatedColor,
+      });
+    } catch {
+      // Ignore auth initialization failures.
+    }
+  };
+
+  void hydrateAwarenessUser();
+
+  return () => {
+    isCancelled = true;
+  };
+}, [currentUserId]);
 
   // Update awareness selection whenever the editor selection changes
   useEffect(() => {
