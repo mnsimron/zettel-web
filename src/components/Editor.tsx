@@ -207,7 +207,7 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         // `user` will be overridden by awareness local state; provide a fallback
         user: {
           name: currentUserId ?? 'Guest',
-          color: '#888',
+          color: '#888888',
         },
       }),
       // Cast configure to any to allow disabling history even if TS types don't expose 'history'
@@ -340,31 +340,6 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       awarenessRef.current = new Awareness(ydoc);
     }
     const awareness = awarenessRef.current!;
-
-    // set local awareness state (user info)
-    const setLocalAwareness = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        const id = user?.id ?? currentUserId ?? 'anon';
-        const name = user?.email ?? id;
-        const color = `#${Math.floor(Math.abs(hashCode(id)) % 0xffffff).toString(16).padStart(6, '0')}`;
-        awareness.setLocalStateField('user', { id, name, color });
-      } catch (e) {
-        // ignore
-      }
-    };
-
-    setLocalAwareness();
-
-    // hash helper
-    function hashCode(str: string) {
-      let h = 0;
-      for (let i = 0; i < str.length; i++) {
-        h = (h << 5) - h + str.charCodeAt(i);
-        h |= 0;
-      }
-      return h;
-    }
 
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
@@ -554,6 +529,49 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
       supabase.removeChannel(channel);
     };
   }, [documentId, currentUserId]);
+
+  // Hydrate the local caret identity after Supabase auth and profile data load.
+  useEffect(() => {
+    let isCancelled = false;
+
+    const hydrateAwarenessUser = async () => {
+      const awareness = awarenessRef.current;
+      if (!awareness) return;
+
+      try {
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError || !user || isCancelled) return;
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (isCancelled) return;
+
+        const emailName = user.email?.split('@')[0]?.trim();
+        const name = profile?.full_name?.trim() || emailName || user.id;
+        let hash = 0;
+        for (let index = 0; index < user.id.length; index++) {
+          hash = (hash << 5) - hash + user.id.charCodeAt(index);
+          hash |= 0;
+        }
+        const color = `#${(Math.abs(hash) % 0xffffff).toString(16).padStart(6, '0')}`;
+
+        awareness.setLocalStateField('user', { id: user.id, name, color });
+        if (currentUserId !== user.id) setCurrentUserId(user.id);
+      } catch {
+        // Auth may still be initializing; the effect will retry when the user id changes.
+      }
+    };
+
+    void hydrateAwarenessUser();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentUserId]);
 
   // Update awareness selection whenever the editor selection changes
   useEffect(() => {
