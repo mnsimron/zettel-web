@@ -57,4 +57,16 @@ body {
   white-space: nowrap !important;
   display: block !important;
   z-index: 51 !important;
+/* --- MAGIC TOOLTIP CSS --- */
+  opacity: 0 !important; /* Sembunyikan secara default */
+  visibility: hidden !important;
+  transition: opacity 0.2s ease-in-out, visibility 0.2s !important;
+  pointer-events: none !important;
+}
+
+/* Munculkan label HANYA saat kursor atau teks di sekitarnya di-hover */
+.ProseMirror .collaboration-cursor__caret:hover .collaboration-cursor__label,
+.tiptap .collaboration-cursor__caret:hover .collaboration-cursor__label {
+  opacity: 1 !important;
+  visibility: visible !important;
 }

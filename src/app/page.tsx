@@ -22,6 +22,13 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [isAuthLoaded, setIsAuthLoaded] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    email?: string | null;
+    name: string;
+    color: string;
+  } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -44,6 +51,16 @@ export default function Home() {
         setUserId(user.id);
         setUserEmail(user.email ?? null);
 
+        // Build a lightweight currentUser object for editor presence
+        const displayName = user.email?.split('@')[0]?.trim() || user.id;
+        let hash = 0;
+        for (let index = 0; index < user.id.length; index++) {
+          hash = (hash << 5) - hash + user.id.charCodeAt(index);
+          hash |= 0;
+        }
+        const generatedColor = `#${(Math.abs(hash) % 0xffffff).toString(16).padStart(6, '0')}`;
+        setCurrentUser({ id: user.id, email: user.email ?? null, name: displayName, color: generatedColor });
+
         const id = await getDefaultWorkspaceId(user.id);
         setWorkspaceId(id);
       } catch (error) {
@@ -53,6 +70,7 @@ export default function Home() {
       } finally {
         if (isMounted) {
           setIsLoadingWorkspace(false);
+          setIsAuthLoaded(true);
         }
       }
     };
@@ -67,6 +85,16 @@ export default function Home() {
       if (!nextUser) {
         setWorkspaceId(null);
         setWorkspaceError('Your session expired. Please sign in again.');
+      } else {
+        const displayName = nextUser.email?.split('@')[0]?.trim() || nextUser.id;
+        let hash = 0;
+        for (let index = 0; index < nextUser.id.length; index++) {
+          hash = (hash << 5) - hash + nextUser.id.charCodeAt(index);
+          hash |= 0;
+        }
+        const generatedColor = `#${(Math.abs(hash) % 0xffffff).toString(16).padStart(6, '0')}`;
+        setCurrentUser({ id: nextUser.id, email: nextUser.email ?? null, name: displayName, color: generatedColor });
+        setIsAuthLoaded(true);
       }
     });
 
@@ -172,16 +200,20 @@ export default function Home() {
         </div>
 
         {currentDocumentId ? (
-          <Editor key={currentDocumentId} documentId={currentDocumentId} onSelectDocument={handleSelectDocument} />
+          !isAuthLoaded ? (
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading user...</p>
+            </div>
+          ) : (
+            <Editor key={currentDocumentId ?? ''} documentId={currentDocumentId!} onSelectDocument={handleSelectDocument} currentUser={currentUser ?? undefined} />
+          )
         ) : (
           <div className="flex flex-1 items-center justify-center">
             <div className="text-center">
               <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
                 No document selected
               </h1>
-              <p className="mt-2 text-sm text-zinc-500">
-                Click “New Page” to create your first document
-              </p>
+              <p className="mt-2 text-sm text-zinc-500">Click “New Page” to create your first document</p>
             </div>
           </div>
         )}

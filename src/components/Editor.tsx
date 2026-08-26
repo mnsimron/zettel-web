@@ -79,6 +79,12 @@ type AccessibleDoc = Database['public']['Tables']['documents_accessible']['Row']
 interface EditorProps {
   documentId: string;
   onSelectDocument?: (documentId: string) => void;
+  currentUser?: {
+    id: string;
+    email?: string | null;
+    name: string;
+    color: string;
+  } | null;
 }
 
 function ToolbarButton({
@@ -136,7 +142,7 @@ function FloatingToolbarButton({
   );
 }
 
-export default function Editor({ documentId, onSelectDocument }: EditorProps) {
+export default function Editor({ documentId, onSelectDocument, currentUser }: EditorProps) {
   const [document, setDocument] = useState<DocRow | null>(null);
   const [documents, setDocuments] = useState<AccessibleDoc[]>([]);
   const [title, setTitle] = useState('');
@@ -190,6 +196,20 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
   providerRef.current.awareness = awarenessRef.current ?? undefined;
   providerRef.current.doc = ydocRef.current ?? undefined;
 
+  // If parent provided a resolved current user, populate awareness local state
+  // immediately so CollaborationCaret does not default to "Guest".
+  if (currentUser && awarenessRef.current) {
+    try {
+      awarenessRef.current.setLocalStateField('user', {
+        name: currentUser.name,
+        color: currentUser.color,
+        email: currentUser.email ?? undefined,
+      });
+    } catch (e) {
+      // ignore
+    }
+  }
+
   const insertImageFromUrl = (url: string) => {
     if (!editor || !url.trim()) return;
     editor.chain().focus().setImage({ src: url.trim(), alt: 'Inserted image' }).run();
@@ -206,8 +226,8 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
         provider: providerRef.current,
         // `user` will be overridden by awareness local state; provide a fallback
         user: {
-          name: currentUserId ?? 'Guest',
-          color: '#888888',
+          name: currentUser?.name ?? currentUserId ?? 'Guest',
+          color: currentUser?.color ?? '#888888',
         },
       }),
       // Cast configure to any to allow disabling history even if TS types don't expose 'history'
@@ -537,6 +557,18 @@ export default function Editor({ documentId, onSelectDocument }: EditorProps) {
   const hydrateAwarenessUser = async () => {
     const awareness = awarenessRef.current;
     if (!awareness) return;
+    // If a parent passed `currentUser`, use it directly and skip async getUser
+    if (currentUser) {
+      try {
+        awareness.setLocalStateField('user', {
+          name: currentUser.name,
+          color: currentUser.color,
+        });
+      } catch {
+        // ignore
+      }
+      return;
+    }
 
     try {
       const {
