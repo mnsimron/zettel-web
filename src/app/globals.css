@@ -28,23 +28,26 @@ body {
 /* --- TipTap Collaboration Cursor Override (Bulletproof) --- */
 .ProseMirror .collaboration-cursor__caret,
 .tiptap .collaboration-cursor__caret {
-  position: absolute !important;
+  position: relative !important; /* Diubah ke relative agar tidak merusak baris teks */
   display: inline-block !important;
-  width: 2px !important;
+  width: 2px !important; /* Kursor menjadi garis tipis */
+  height: 1.2em !important; /* Menyesuaikan tinggi teks */
+  vertical-align: middle !important;
   margin-left: -1px !important;
   margin-right: -1px !important;
-  border-left: none !important;
-  border-right: none !important;
+  border: none !important;
   background-color: currentColor !important;
   word-break: normal !important;
-  pointer-events: none !important;
+  
+  /* WAJIB AUTO: Agar browser bisa mendeteksi saat mouse menyentuh kursor */
+  pointer-events: auto !important; 
   z-index: 50 !important;
 }
 
 .ProseMirror .collaboration-cursor__label,
 .tiptap .collaboration-cursor__label {
   position: absolute !important;
-  top: -1.5em !important;
+  top: -1.8em !important; /* Disesuaikan sedikit agar tidak menabrak teks */
   left: -1px !important;
   font-size: 12px !important;
   font-style: normal !important;
@@ -57,14 +60,15 @@ body {
   white-space: nowrap !important;
   display: block !important;
   z-index: 51 !important;
-/* --- MAGIC TOOLTIP CSS --- */
+  
+  /* --- MAGIC TOOLTIP CSS --- */
   opacity: 0 !important; /* Sembunyikan secara default */
   visibility: hidden !important;
   transition: opacity 0.2s ease-in-out, visibility 0.2s !important;
-  pointer-events: none !important;
+  pointer-events: none !important; /* Label tidak boleh menghalangi klik teks di bawahnya */
 }
 
-/* Munculkan label HANYA saat kursor atau teks di sekitarnya di-hover */
+/* Munculkan label HANYA saat garis kursor di-hover */
 .ProseMirror .collaboration-cursor__caret:hover .collaboration-cursor__label,
 .tiptap .collaboration-cursor__caret:hover .collaboration-cursor__label {
   opacity: 1 !important;
