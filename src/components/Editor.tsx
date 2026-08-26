@@ -165,9 +165,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   }>>([]);
   const saveTimeoutRef = useRef<number | null>(null);
   const remoteUpdateRef = useRef(false);
-  // Yjs document and awareness refs for collaboration
-  const ydocRef = useRef<Y.Doc | null>(null);
-  const awarenessRef = useRef<Awareness | null>(null);
+  // Keep one Yjs document and awareness instance for this editor component.
+  const [ydoc] = useState(() => new Y.Doc());
+  const [awareness] = useState(() => new Awareness(ydoc));
   // Dynamically load TipTap menu components to avoid duplicate runtime registration
   const [Menus, setMenus] = useState<{ FloatingMenu?: any; BubbleMenu?: any } | null>(null);
 
@@ -178,37 +178,12 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       .catch((err) => console.error('Failed to load TipTap menus dynamically', err));
   }, []);
 
-  // Ensure Y.Doc exists before initializing the editor so Collaboration extension can use it
-  if (!ydocRef.current) {
-    ydocRef.current = new Y.Doc();
-  }
-  if (!awarenessRef.current) {
-    awarenessRef.current = new Awareness(ydocRef.current);
-  }
-
   // Stable provider object used by CollaborationCaret. Keep fields updated
   // to avoid the extension reading `provider.doc` when it's undefined.
   const providerRef = useRef<{ awareness?: Awareness; doc?: Y.Doc }>({
-    awareness: awarenessRef.current ?? undefined,
-    doc: ydocRef.current ?? undefined,
+    awareness,
+    doc: ydoc,
   });
-  // keep provider fields in sync
-  providerRef.current.awareness = awarenessRef.current ?? undefined;
-  providerRef.current.doc = ydocRef.current ?? undefined;
-
-  // If parent provided a resolved current user, populate awareness local state
-  // immediately so CollaborationCaret does not default to "Guest".
-  if (currentUser && awarenessRef.current) {
-    try {
-      awarenessRef.current.setLocalStateField('user', {
-        name: currentUser.name,
-        color: currentUser.color,
-        email: currentUser.email ?? undefined,
-      });
-    } catch (e) {
-      // ignore
-    }
-  }
 
   const insertImageFromUrl = (url: string) => {
     if (!editor || !url.trim()) return;
@@ -219,7 +194,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     immediatelyRender: false,
     extensions: [
       // TipTap Yjs collaboration support
-      Collaboration.configure({ document: ydocRef.current ?? new Y.Doc() }),
+      Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         // Pass a stable provider object so the extension won't encounter a
         // briefly-undefined `provider.doc` or `provider.awareness`.
@@ -352,14 +327,6 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   // Setup Yjs <-> Supabase realtime transport
   useEffect(() => {
     if (!documentId) return;
-
-    const ydoc = ydocRef.current ?? new Y.Doc();
-    if (!ydocRef.current) ydocRef.current = ydoc;
-
-    if (!awarenessRef.current) {
-      awarenessRef.current = new Awareness(ydoc);
-    }
-    const awareness = awarenessRef.current!;
 
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
@@ -576,8 +543,6 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   let isCancelled = false;
 
   const hydrateAwarenessUser = async () => {
-    const awareness = awarenessRef.current;
-    if (!awareness) return;
     // If a parent passed `currentUser`, use it directly and skip async getUser
     if (currentUser) {
       try {
@@ -625,12 +590,11 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   return () => {
     isCancelled = true;
   };
-}, [currentUserId]);
+}, [currentUser, currentUserId]);
 
   // Update awareness selection whenever the editor selection changes
   useEffect(() => {
-    if (!editor || !awarenessRef.current) return;
-    const awareness = awarenessRef.current;
+    if (!editor) return;
     const edAny = editor as any;
     let selectionFrame: number | null = null;
 
@@ -681,8 +645,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     }
 
     try {
-      const ydoc = ydocRef.current;
-      const xml = ydoc && typeof (ydoc as any).getXmlFragment === 'function'
+      const xml = typeof (ydoc as any).getXmlFragment === 'function'
         ? (ydoc as any).getXmlFragment('prosemirror')
         : null;
 
