@@ -365,7 +365,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     const channelName = `realtime:yjs:documents:${documentId}`;
     console.log('📡 [Yjs] Connecting to channel:', channelName);
     const channel = supabase.channel(channelName, {
-      config: { broadcast: { ack: true, self: false } },
+      config: { broadcast: { ack: true } },
     });
     const remoteOrigin = 'supabase-remote';
     const clientId = ((ydoc as any)?.clientID) ?? null;
@@ -383,6 +383,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       if (update.byteLength === 0) return;
 
       const arr = Array.from(update);
+      console.log('📤 Sending full Yjs state', { documentId, clientId, bytes: update.byteLength });
       void channel.send({
         type: 'broadcast',
         event,
@@ -414,15 +415,17 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
 
     // Broadcast local ydoc updates to others (the `update` argument is incremental)
     const onLocalUpdate = (update: Uint8Array, origin: unknown) => {
-      if (origin === remoteOrigin || update.byteLength === 0 || disposed) return;
-      if (channelStatus !== 'SUBSCRIBED') return;
-
       try {
+        if (origin === remoteOrigin || update.byteLength === 0 || disposed) return;
+        if (channelStatus !== 'SUBSCRIBED') return;
+
+        console.log('📤 Sending Yjs Update', { documentId, clientId, bytes: update.byteLength });
+
         const arr = Array.from(update);
         const key = JSON.stringify(arr);
         if (sentUpdates.has(key)) return;
         sentUpdates.add(key);
-        if (sentUpdates.size > 100) {
+        if (sentUpdates.size > 200) {
           const oldest = sentUpdates.values().next().value;
           if (oldest) sentUpdates.delete(oldest);
         }
@@ -434,7 +437,11 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     };
 
     if (ydoc && typeof (ydoc as any).on === 'function') {
-      (ydoc as any).on('update', onLocalUpdate);
+      try {
+        (ydoc as any).on('update', onLocalUpdate);
+      } catch (e) {
+        console.warn('[Yjs] Failed to attach local update listener', e);
+      }
     }
 
     // Broadcast awareness changes when they occur
@@ -450,16 +457,21 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     };
 
     if (awareness && typeof (awareness as any).on === 'function') {
-      (awareness as any).on('update', onAwarenessChange as any);
+      try {
+        (awareness as any).on('update', onAwarenessChange as any);
+      } catch (e) {
+        console.warn('[Yjs] Failed to attach awareness listener', e);
+      }
     }
 
     // Listen for remote updates via Supabase broadcast
     channel.on('broadcast', { event: 'yjs-update' }, (payload) => {
       try {
+        console.log('📥 Received Yjs Update', { documentId, payloadSummary: { event: payload.event, hasUpdate: !!(payload.payload?.update ?? payload.update) } });
         const arr = payload.payload?.update ?? payload.update ?? null;
         const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
         if (!arr) return;
-        // Skip applying updates we originated
+        // Skip applying updates we originated (best-effort)
         if (senderClientId !== undefined && senderClientId === clientId) return;
         const update = new Uint8Array(arr as number[]);
         if (update.byteLength === 0) return;
@@ -548,7 +560,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       }
       supabase.removeChannel(channel);
     };
-  }, [documentId, currentUserId]);
+  }, [documentId]);
 
   // Hydrate the local caret identity after Supabase auth and profile data load.
   useEffect(() => {
