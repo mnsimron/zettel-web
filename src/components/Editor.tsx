@@ -419,17 +419,21 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
         if (origin === remoteOrigin || update.byteLength === 0 || disposed) return;
         if (channelStatus !== 'SUBSCRIBED') return;
 
-        console.log('📤 Sending Yjs Update', { documentId, clientId, bytes: update.byteLength });
+        const payloadData = {
+          update: Array.from(update),
+          clientId,
+        };
 
-        const arr = Array.from(update);
-        const key = JSON.stringify(arr);
+        console.log('📤 Sending Yjs Update payload length:', payloadData.update.length);
+
+        const key = JSON.stringify(payloadData.update);
         if (sentUpdates.has(key)) return;
         sentUpdates.add(key);
         if (sentUpdates.size > 200) {
           const oldest = sentUpdates.values().next().value;
           if (oldest) sentUpdates.delete(oldest);
         }
-        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: arr, clientId } })
+        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: payloadData })
           .catch((error: unknown) => console.warn('[Yjs] Failed to send update', error));
       } catch (e) {
         console.error('Failed to broadcast Yjs update', e);
@@ -467,13 +471,14 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     // Listen for remote updates via Supabase broadcast
     channel.on('broadcast', { event: 'yjs-update' }, (payload) => {
       try {
-        console.log('📥 Received Yjs Update', { documentId, payloadSummary: { event: payload.event, hasUpdate: !!(payload.payload?.update ?? payload.update) } });
-        const arr = payload.payload?.update ?? payload.update ?? null;
-        const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
-        if (!arr) return;
+        const payloadData = payload.payload;
+        const arr = payloadData?.update;
+        const senderClientId = payloadData?.clientId;
+        console.log('📥 Received Yjs Update payload length:', Array.isArray(arr) ? arr.length : 0);
+        if (!Array.isArray(arr) || arr.length === 0) return;
         // Skip applying updates we originated (best-effort)
-        if (senderClientId !== undefined && senderClientId === clientId) return;
-        const update = new Uint8Array(arr as number[]);
+        if (senderClientId === clientId) return;
+        const update = new Uint8Array(arr);
         if (update.byteLength === 0) return;
         remoteUpdateRef.current = true;
         try {
