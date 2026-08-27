@@ -222,7 +222,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
         document: ydoc,
       }),
       CollaborationCaret.configure({
-        provider: { awareness }, // The mock provider wrapper is CRITICAL for the caret to render
+        provider: { awareness }, // The mock provider wrapper is CRyITICAL for the caret to render
       }),
       // Cast configure to any to allow disabling history even if TS types don't expose 'history'
       (StarterKit.configure as any)({ history: false }),
