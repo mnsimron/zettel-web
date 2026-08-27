@@ -168,6 +168,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   // Yjs document and awareness refs for collaboration
   const ydocRef = useRef<Y.Doc | null>(null);
   const awarenessRef = useRef<Awareness | null>(null);
+  // Create a stable Y.Doc and Awareness instance so they are not recreated on every render
+  const [ydoc] = useState<Y.Doc>(() => new Y.Doc());
+  const [awareness] = useState<Awareness>(() => new Awareness(ydoc));
   // Dynamically load TipTap menu components to avoid duplicate runtime registration
   const [Menus, setMenus] = useState<{ FloatingMenu?: any; BubbleMenu?: any } | null>(null);
 
@@ -178,23 +181,19 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       .catch((err) => console.error('Failed to load TipTap menus dynamically', err));
   }, []);
 
-  // Ensure Y.Doc exists before initializing the editor so Collaboration extension can use it
-  if (!ydocRef.current) {
-    ydocRef.current = new Y.Doc();
-  }
-  if (!awarenessRef.current) {
-    awarenessRef.current = new Awareness(ydocRef.current);
-  }
+  // Ensure refs point to the stable instances created above
+  ydocRef.current = ydoc;
+  awarenessRef.current = awareness;
 
   // Stable provider object used by CollaborationCaret. Keep fields updated
   // to avoid the extension reading `provider.doc` when it's undefined.
   const providerRef = useRef<{ awareness?: Awareness; doc?: Y.Doc }>({
-    awareness: awarenessRef.current ?? undefined,
-    doc: ydocRef.current ?? undefined,
+    awareness: awareness ?? undefined,
+    doc: ydoc ?? undefined,
   });
   // keep provider fields in sync
-  providerRef.current.awareness = awarenessRef.current ?? undefined;
-  providerRef.current.doc = ydocRef.current ?? undefined;
+  providerRef.current.awareness = awareness ?? undefined;
+  providerRef.current.doc = ydoc ?? undefined;
 
   // If parent provided a resolved current user, populate awareness local state
   // immediately so CollaborationCaret does not default to "Guest".
@@ -219,16 +218,11 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     immediatelyRender: false,
     extensions: [
       // TipTap Yjs collaboration support
-      Collaboration.configure({ document: ydocRef.current ?? new Y.Doc() }),
+      Collaboration.configure({
+        document: ydoc,
+      }),
       CollaborationCaret.configure({
-        // Pass a stable provider object so the extension won't encounter a
-        // briefly-undefined `provider.doc` or `provider.awareness`.
-        provider: providerRef.current,
-        // `user` will be overridden by awareness local state; provide a fallback
-        user: {
-          name: currentUser?.name ?? currentUserId ?? 'Guest',
-          color: currentUser?.color ?? '#888888',
-        },
+        provider: { awareness }, // The mock provider wrapper is CRITICAL for the caret to render
       }),
       // Cast configure to any to allow disabling history even if TS types don't expose 'history'
       (StarterKit.configure as any)({ history: false }),
@@ -353,13 +347,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   useEffect(() => {
     if (!documentId) return;
 
-    const ydoc = ydocRef.current ?? new Y.Doc();
-    if (!ydocRef.current) ydocRef.current = ydoc;
-
-    if (!awarenessRef.current) {
-      awarenessRef.current = new Awareness(ydoc);
-    }
-    const awareness = awarenessRef.current!;
+    // Use the stable ydoc/awareness instances
+    const ydocLocal = ydoc;
+    const awarenessLocal = awareness;
 
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
@@ -368,7 +358,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       config: { broadcast: { ack: true } },
     });
     const remoteOrigin = 'supabase-remote';
-    const clientId = ((ydoc as any)?.clientID) ?? null;
+    const clientId = ((ydocLocal as any)?.clientID) ?? null;
     const sentUpdates = new Set<string>();
     let awarenessTimer: number | null = null;
     let pendingAwarenessUpdate: Uint8Array | null = null;
@@ -379,7 +369,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     const sendYjsState = (event: 'yjs-update' | 'request-sync') => {
       if (disposed || channelStatus !== 'SUBSCRIBED') return;
 
-      const update = Y.encodeStateAsUpdate(ydoc);
+      const update = Y.encodeStateAsUpdate(ydocLocal);
       if (update.byteLength === 0) return;
 
       const arr = Array.from(update);
@@ -436,9 +426,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       }
     };
 
-    if (ydoc && typeof (ydoc as any).on === 'function') {
+    if (ydocLocal && typeof (ydocLocal as any).on === 'function') {
       try {
-        (ydoc as any).on('update', onLocalUpdate);
+        (ydocLocal as any).on('update', onLocalUpdate);
       } catch (e) {
         console.warn('[Yjs] Failed to attach local update listener', e);
       }
@@ -449,40 +439,54 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       try {
         const changed = added.concat(updated).concat(removed || []);
         if (changed.length === 0) return;
-        const awarenessUpdate = encodeAwarenessUpdate(awareness, changed);
+        const awarenessUpdate = encodeAwarenessUpdate(awarenessLocal, changed);
         scheduleAwarenessUpdate(new Uint8Array(awarenessUpdate));
       } catch (e) {
         console.error('Failed to broadcast awareness update', e);
       }
     };
 
-    if (awareness && typeof (awareness as any).on === 'function') {
+    if (awarenessLocal && typeof (awarenessLocal as any).on === 'function') {
       try {
-        (awareness as any).on('update', onAwarenessChange as any);
+        (awarenessLocal as any).on('update', onAwarenessChange as any);
       } catch (e) {
         console.warn('[Yjs] Failed to attach awareness listener', e);
       }
     }
 
     // Listen for remote updates via Supabase broadcast
-    channel.on('broadcast', { event: 'yjs-update' }, (payload) => {
+    channel.on('broadcast', { event: 'yjs-update' }, (msg) => {
+      console.log('📥 Received Yjs Update raw message:', msg);
       try {
-        console.log('📥 Received Yjs Update', { documentId, payloadSummary: { event: payload.event, hasUpdate: !!(payload.payload?.update ?? payload.update) } });
-        const arr = payload.payload?.update ?? payload.update ?? null;
-        const senderClientId = payload.payload?.clientId ?? payload.clientId ?? null;
-        if (!arr) return;
-        // Skip applying updates we originated (best-effort)
-        if (senderClientId !== undefined && senderClientId === clientId) return;
-        const update = new Uint8Array(arr as number[]);
+        // Supabase can sometimes nest the payload depending on how it was sent
+        const payloadData = msg.payload?.payload ?? msg.payload ?? msg;
+        const updateArray = payloadData?.update ?? null;
+        const senderClientId = payloadData?.clientId ?? null;
+
+        if (!updateArray) {
+          console.warn('⚠️ Received broadcast but no update array found', msg);
+          return;
+        }
+
+        // Ignore own echoes
+        if (senderClientId === (ydocLocal as any).clientID) return;
+
+        const update = new Uint8Array(updateArray as number[]);
         if (update.byteLength === 0) return;
+
         remoteUpdateRef.current = true;
         try {
-          Y.applyUpdate(ydoc, update, remoteOrigin);
+          try {
+            Y.applyUpdate(ydocLocal, update, 'supabase-remote');
+            console.log('✅ Successfully applied remote update to ydoc');
+          } catch (innerErr) {
+            console.error('❌ Failed to apply Yjs update:', innerErr, { msg });
+          }
         } finally {
           remoteUpdateRef.current = false;
         }
       } catch (e) {
-        console.error('Failed to apply remote Yjs update', e);
+        console.error('Unexpected error while handling remote Yjs update', e);
       }
     });
 
