@@ -165,12 +165,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   }>>([]);
   const saveTimeoutRef = useRef<number | null>(null);
   const remoteUpdateRef = useRef(false);
-  // Yjs document and awareness refs for collaboration
-  const ydocRef = useRef<Y.Doc | null>(null);
-  const awarenessRef = useRef<Awareness | null>(null);
-  // Create a stable Y.Doc and Awareness instance so they are not recreated on every render
-  const [ydoc] = useState<Y.Doc>(() => new Y.Doc());
-  const [awareness] = useState<Awareness>(() => new Awareness(ydoc));
+  // Keep one Yjs document and awareness instance for this editor component.
+  const [ydoc] = useState(() => new Y.Doc());
+  const [awareness] = useState(() => new Awareness(ydoc));
   // Dynamically load TipTap menu components to avoid duplicate runtime registration
   const [Menus, setMenus] = useState<{ FloatingMenu?: any; BubbleMenu?: any } | null>(null);
 
@@ -181,25 +178,18 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       .catch((err) => console.error('Failed to load TipTap menus dynamically', err));
   }, []);
 
-  // Ensure refs point to the stable instances created above
-  ydocRef.current = ydoc;
-  awarenessRef.current = awareness;
-
   // Stable provider object used by CollaborationCaret. Keep fields updated
   // to avoid the extension reading `provider.doc` when it's undefined.
-  const providerRef = useRef<{ awareness?: Awareness; doc?: Y.Doc }>({
-    awareness: awareness ?? undefined,
-    doc: ydoc ?? undefined,
-  });
+  const providerRef = useRef<{ awareness?: Awareness; doc?: Y.Doc }>({ awareness, doc: ydoc });
   // keep provider fields in sync
-  providerRef.current.awareness = awareness ?? undefined;
-  providerRef.current.doc = ydoc ?? undefined;
+  providerRef.current.awareness = awareness;
+  providerRef.current.doc = ydoc;
 
   // If parent provided a resolved current user, populate awareness local state
   // immediately so CollaborationCaret does not default to "Guest".
-  if (currentUser && awarenessRef.current) {
+  if (currentUser && awareness) {
     try {
-      awarenessRef.current.setLocalStateField('user', {
+      awareness.setLocalStateField('user', {
         name: currentUser.name,
         color: currentUser.color,
         email: currentUser.email ?? undefined,
@@ -218,9 +208,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     immediatelyRender: false,
     extensions: [
       // TipTap Yjs collaboration support
-      Collaboration.configure({
-        document: ydoc,
-      }),
+      Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         provider: { awareness }, // The mock provider wrapper is CRyITICAL for the caret to render
       }),
@@ -350,7 +338,6 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     // Use the stable ydoc/awareness instances
     const ydocLocal = ydoc;
     const awarenessLocal = awareness;
-
     // Supabase channel for document Yjs messages
     const channelName = `realtime:yjs:documents:${documentId}`;
     console.log('📡 [Yjs] Connecting to channel:', channelName);
@@ -409,17 +396,19 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
         if (origin === remoteOrigin || update.byteLength === 0 || disposed) return;
         if (channelStatus !== 'SUBSCRIBED') return;
 
-        console.log('📤 Sending Yjs Update', { documentId, clientId, bytes: update.byteLength });
+        const updateArray = Array.from(update);
+        const payloadData = { update: updateArray, clientId: ydoc.clientID };
 
-        const arr = Array.from(update);
-        const key = JSON.stringify(arr);
+        console.log('📤 [SENDER] Sending packet. Size:', updateArray.length);
+
+        const key = JSON.stringify(updateArray);
         if (sentUpdates.has(key)) return;
         sentUpdates.add(key);
         if (sentUpdates.size > 200) {
           const oldest = sentUpdates.values().next().value;
           if (oldest) sentUpdates.delete(oldest);
         }
-        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: { update: arr, clientId } })
+        void channel.send({ type: 'broadcast', event: 'yjs-update', payload: payloadData })
           .catch((error: unknown) => console.warn('[Yjs] Failed to send update', error));
       } catch (e) {
         console.error('Failed to broadcast Yjs update', e);
@@ -571,8 +560,6 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   let isCancelled = false;
 
   const hydrateAwarenessUser = async () => {
-    const awareness = awarenessRef.current;
-    if (!awareness) return;
     // If a parent passed `currentUser`, use it directly and skip async getUser
     if (currentUser) {
       try {
@@ -620,12 +607,11 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   return () => {
     isCancelled = true;
   };
-}, [currentUserId]);
+}, [currentUser, currentUserId]);
 
   // Update awareness selection whenever the editor selection changes
   useEffect(() => {
-    if (!editor || !awarenessRef.current) return;
-    const awareness = awarenessRef.current;
+    if (!editor) return;
     const edAny = editor as any;
     let selectionFrame: number | null = null;
 
@@ -676,8 +662,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     }
 
     try {
-      const ydoc = ydocRef.current;
-      const xml = ydoc && typeof (ydoc as any).getXmlFragment === 'function'
+      const xml = typeof (ydoc as any).getXmlFragment === 'function'
         ? (ydoc as any).getXmlFragment('prosemirror')
         : null;
 
