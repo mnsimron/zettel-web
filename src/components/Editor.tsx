@@ -165,9 +165,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   }>>([]);
   const saveTimeoutRef = useRef<number | null>(null);
   const remoteUpdateRef = useRef(false);
-  // Keep one Yjs document and awareness instance for this editor component.
-  const [ydoc] = useState(() => new Y.Doc());
-  const [awareness] = useState(() => new Awareness(ydoc));
+  // Create a fresh Yjs document and awareness whenever the documentId changes.
+  const ydoc = useMemo(() => new Y.Doc(), [documentId]);
+  const awareness = useMemo(() => new Awareness(ydoc), [ydoc]);
   // Dynamically load TipTap menu components to avoid duplicate runtime registration
   const [Menus, setMenus] = useState<{ FloatingMenu?: any; BubbleMenu?: any } | null>(null);
 
@@ -329,7 +329,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
         }
       }, 1000);
     },
-  });
+  }, [documentId, ydoc, awareness]);
 
   // Setup Yjs <-> Supabase realtime transport
   useEffect(() => {
@@ -537,21 +537,44 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     void channel.subscribe(handleChannelStatus);
 
     return () => {
+      console.log('🧹 [CLEANUP] Removing channel and clearing awareness...');
+      // Mark disposed and close channel state
       disposed = true;
       channelStatus = 'CLOSED';
+
+      // 1. Remove the user from the awareness (clears ghost cursors)
+      try {
+        if (awarenessLocal && typeof (awarenessLocal as any).setLocalState === 'function') {
+          awarenessLocal.setLocalState(null);
+        } else if (awareness && typeof (awareness as any).setLocalState === 'function') {
+          awareness.setLocalState(null);
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // Clear timers
       if (awarenessTimer !== null) window.clearTimeout(awarenessTimer);
       if (retryTimer !== null) window.clearTimeout(retryTimer);
+
+      // Remove listeners
       try {
-        if (ydoc && typeof (ydoc as any).off === 'function') (ydoc as any).off('update', onLocalUpdate);
+        if (ydocLocal && typeof (ydocLocal as any).off === 'function') (ydocLocal as any).off('update', onLocalUpdate);
       } catch (e) {
         // ignore
       }
       try {
-        if (awareness && typeof (awareness as any).off === 'function') (awareness as any).off('update', onAwarenessChange as any);
+        if (awarenessLocal && typeof (awarenessLocal as any).off === 'function') (awarenessLocal as any).off('update', onAwarenessChange as any);
       } catch (e) {
         // ignore
       }
-      supabase.removeChannel(channel);
+
+      // Finally remove the Supabase channel
+      try {
+        supabase.removeChannel(channel);
+      } catch (e) {
+        // ignore
+      }
     };
   }, [documentId]);
 

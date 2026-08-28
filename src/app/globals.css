@@ -77,3 +77,10 @@ body {
   opacity: 1 !important;
   visibility: visible !important;
 }
+
+/* Additional exact rule requested to avoid Tailwind prose overriding the caret */
+.tiptap .collaboration-cursor__caret {
+  display: inline-block !important;
+  border-left: 2px solid currentColor !important;
+  background-color: transparent !important;
+}
