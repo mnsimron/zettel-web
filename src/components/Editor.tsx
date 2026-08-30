@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from 'y-protocols/awareness';
 import Collaboration from '@tiptap/extension-collaboration';
+import { useYjsHydration } from '@/hooks/useYjsHydration';
 import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { toast } from 'sonner';
@@ -165,6 +166,8 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   }>>([]);
   const saveTimeoutRef = useRef<number | null>(null);
   const remoteUpdateRef = useRef(false);
+  const hydration = useYjsHydration({ documentId });
+  const hydrationCompleteRef = useRef(false);
   // Create a fresh Yjs document and awareness whenever the documentId changes.
   const ydoc = useMemo(() => new Y.Doc(), [documentId]);
   const awareness = useMemo(() => new Awareness(ydoc), [ydoc]);
@@ -182,6 +185,12 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   useEffect(() => {
     return () => {
       console.log('💥 [TEARDOWN] Destroying Y.Doc and Awareness for:', documentId);
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      hydration.reset();
+      hydrationCompleteRef.current = false;
       try {
         awareness.destroy();
         ydoc.destroy();
@@ -189,7 +198,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
         console.error('Failed to destroy Y.Doc/Awareness', e);
       }
     };
-  }, [ydoc, awareness, documentId]);
+  }, [ydoc, awareness, documentId, hydration]);
 
   // Stable provider object used by CollaborationCaret. Keep fields updated
   // to avoid the extension reading `provider.doc` when it's undefined.
@@ -298,6 +307,8 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     // content programmatically after the editor initializes instead.
     onUpdate: ({ editor, transaction }) => {
       if (remoteUpdateRef.current || transaction.getMeta('supabase-remote')) return;
+      // Don't save until hydration is complete to avoid overwriting with stale content
+      if (!hydrationCompleteRef.current) return;
 
       const html = editor.getHTML();
 
@@ -340,7 +351,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
         } finally {
           setIsSaving(false);
         }
-      }, 1000);
+      }, 2000);
     },
   }, [documentId, ydoc, awareness]);
 
@@ -460,6 +471,12 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     channel.on('broadcast', { event: 'yjs-update' }, (msg) => {
       console.log('📥 Received Yjs Update raw message:', msg);
       try {
+        // Block remote updates until initial DB hydration is complete
+        if (!hydration.isReadyForRemoteUpdates()) {
+          console.log('⏸️  [HYDRATION] Blocking remote Yjs update - waiting for DB hydration');
+          return;
+        }
+
         // Supabase can sometimes nest the payload depending on how it was sent
         const payloadData = msg.payload?.payload ?? msg.payload ?? msg;
         const updateArray = payloadData?.update ?? null;
@@ -684,17 +701,16 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     };
   }, [editor]);
 
-  // Hydrate the Yjs document only once when the fetched Supabase document is empty.
-  const initializedRef = useRef(false);
-
+  // Hydrate the Yjs document when fetched Supabase content arrives
   useEffect(() => {
-    if (!editor || !document || initializedRef.current) return;
+    if (!editor || hydrationCompleteRef.current) return;
 
-    const html = document.content ?? '';
-    if (!html) {
-      initializedRef.current = true;
+    // If no document yet (loading), don't hydrate yet
+    if (!document) {
       return;
     }
+
+    const html = document.content ?? '';
 
     try {
       const xml = typeof (ydoc as any).getXmlFragment === 'function' 
@@ -703,17 +719,21 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       const yjsHasContent = !!xml && typeof (xml as any).toArray === 'function' && (xml as any).toArray().length > 0;
 
       if (!yjsHasContent) {
-        console.log('💧 Hydrating initial content from database...');
+        console.log('💧 [HYDRATION] Starting DB hydration...');
         // Clear first, then set content without broadcasting to Supabase
         editor.commands.clearContent(false);
-        editor.commands.setContent(html, { emitUpdate: false });
+        if (html) {
+          editor.commands.setContent(html, { emitUpdate: false });
+        }
+        console.log('✅ [HYDRATION] Complete - DB content loaded into Yjs');
       }
     } catch (e) {
       console.error('Failed to hydrate document:', e);
     } finally {
-      initializedRef.current = true;
+      hydrationCompleteRef.current = true;
+      hydration.markHydrationComplete();
     }
-  }, [editor, document, documentId, ydoc]);
+  }, [editor, document, documentId, ydoc, hydration]);
 
   const fetchCollaborators = async (targetDocumentId: string) => {
     const { data, error: collaboratorsError } = await supabase
@@ -748,11 +768,21 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   };
 
   useEffect(() => {
+    // Reset all state on documentId change
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    hydration.reset();
+    hydrationCompleteRef.current = false;
+
     let isCancelled = false;
+    const abortController = new AbortController();
 
     const fetchDocument = async () => {
       setIsLoading(true);
       setError(null);
+      hydration.markHydrationStart();
 
       try {
         const { data, error: fetchError } = await supabase
@@ -763,7 +793,10 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
 
         if (fetchError) throw fetchError;
 
-        if (isCancelled) return;
+        if (isCancelled) {
+          hydration.markHydrationComplete();
+          return;
+        }
 
         setDocument(data as DocRow);
         setTitle(data.title || '');
@@ -794,9 +827,13 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
 
         await fetchCollaborators(data.id);
       } catch (err) {
-        if (isCancelled) return;
+        if (isCancelled) {
+          hydration.markHydrationComplete();
+          return;
+        }
         const message = err instanceof Error ? err.message : 'Failed to load document';
         setError(message);
+        hydration.markHydrationComplete();
       } finally {
         if (!isCancelled) {
           setIsLoading(false);
@@ -808,8 +845,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
 
     return () => {
       isCancelled = true;
+      abortController.abort();
     };
-  }, [documentId]);
+  }, [documentId, hydration]);
 
   // Realtime subscription: apply external updates to this document
   useEffect(() => {
