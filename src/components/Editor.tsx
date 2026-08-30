@@ -178,6 +178,19 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       .catch((err) => console.error('Failed to load TipTap menus dynamically', err));
   }, []);
 
+  // Destroy Y.Doc and Awareness when component unmounts to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      console.log('💥 [TEARDOWN] Destroying Y.Doc and Awareness for:', documentId);
+      try {
+        awareness.destroy();
+        ydoc.destroy();
+      } catch (e) {
+        console.error('Failed to destroy Y.Doc/Awareness', e);
+      }
+    };
+  }, [ydoc, awareness, documentId]);
+
   // Stable provider object used by CollaborationCaret. Keep fields updated
   // to avoid the extension reading `provider.doc` when it's undefined.
   const providerRef = useRef<{ awareness?: Awareness; doc?: Y.Doc }>({ awareness, doc: ydoc });
@@ -675,8 +688,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   const initializedRef = useRef(false);
 
   useEffect(() => {
-    if (!editor || !document) return;
-    if (initializedRef.current) return;
+    if (!editor || !document || initializedRef.current) return;
 
     const html = document.content ?? '';
     if (!html) {
@@ -685,21 +697,23 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     }
 
     try {
-      const xml = typeof (ydoc as any).getXmlFragment === 'function'
-        ? (ydoc as any).getXmlFragment('prosemirror')
+      const xml = typeof (ydoc as any).getXmlFragment === 'function' 
+        ? (ydoc as any).getXmlFragment('prosemirror') 
         : null;
-
       const yjsHasContent = !!xml && typeof (xml as any).toArray === 'function' && (xml as any).toArray().length > 0;
 
       if (!yjsHasContent) {
+        console.log('💧 Hydrating initial content from database...');
+        // Clear first, then set content without broadcasting to Supabase
+        editor.commands.clearContent(false);
         editor.commands.setContent(html, { emitUpdate: false });
       }
     } catch (e) {
-      console.error('Failed to hydrate collaboration document from Supabase:', e);
+      console.error('Failed to hydrate document:', e);
     } finally {
       initializedRef.current = true;
     }
-  }, [editor, document, documentId]);
+  }, [editor, document, documentId, ydoc]);
 
   const fetchCollaborators = async (targetDocumentId: string) => {
     const { data, error: collaboratorsError } = await supabase
