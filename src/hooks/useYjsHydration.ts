@@ -17,41 +17,45 @@ export function useYjsHydration({ documentId }: UseYjsHydrationOptions) {
     }
   }, [documentId]);
 
-  const markHydrationStart = () => {
-    isHydratedRef.current = false;
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    // Force complete hydration after 5 seconds to prevent indefinite blocking
-    timeoutRef.current = window.setTimeout(() => {
-      console.warn('⏱️  [HYDRATION] Timeout - forcing completion after 5s');
-      isHydratedRef.current = true;
-      timeoutRef.current = null;
-    }, 5000);
-  };
+  // Use a ref to hold the API so the returned object identity is stable
+  const apiRef = useRef<{
+    markHydrationStart: () => void;
+    markHydrationComplete: () => void;
+    isReadyForRemoteUpdates: () => boolean;
+    reset: () => void;
+  } | null>(null);
 
-  const markHydrationComplete = () => {
-    isHydratedRef.current = true;
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  };
+  if (apiRef.current === null) {
+    apiRef.current = {
+      markHydrationStart: () => {
+        isHydratedRef.current = false;
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+        // Force complete hydration after 5 seconds to prevent indefinite blocking
+        timeoutRef.current = window.setTimeout(() => {
+          console.warn('⏱️  [HYDRATION] Timeout - forcing completion after 5s');
+          isHydratedRef.current = true;
+          timeoutRef.current = null;
+        }, 5000);
+      },
+      markHydrationComplete: () => {
+        isHydratedRef.current = true;
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
+      },
+      isReadyForRemoteUpdates: () => isHydratedRef.current,
+      reset: () => {
+        isHydratedRef.current = false;
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
+      },
+    };
+  }
 
-  const isReadyForRemoteUpdates = () => isHydratedRef.current;
-
-  const reset = () => {
-    isHydratedRef.current = false;
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  };
-
-  return {
-    markHydrationStart,
-    markHydrationComplete,
-    isReadyForRemoteUpdates,
-    reset,
-  };
+  return apiRef.current;
 }
