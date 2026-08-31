@@ -168,6 +168,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   const remoteUpdateRef = useRef(false);
   const hydration = useYjsHydration({ documentId });
   const hydrationCompleteRef = useRef(false);
+  const lastHydratedDocumentRef = useRef<{ docId: string | null; html: string | null }>({ docId: null, html: null });
   // Create a fresh Yjs document and awareness whenever the documentId changes.
   const ydoc = useMemo(() => new Y.Doc(), [documentId]);
   const awareness = useMemo(() => new Awareness(ydoc), [ydoc]);
@@ -703,30 +704,28 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
 
   // Hydrate the Yjs document when fetched Supabase content arrives
   useEffect(() => {
-    if (!editor || hydrationCompleteRef.current) return;
+    if (!editor || !document || !documentId) return;
+    if (hydrationCompleteRef.current) return;
 
-    // If no document yet (loading), don't hydrate yet
-    if (!document) {
+    const html = document.content ?? '';
+    const alreadyHydratedForThisDocument =
+      lastHydratedDocumentRef.current.docId === documentId &&
+      lastHydratedDocumentRef.current.html === html;
+
+    if (alreadyHydratedForThisDocument) {
+      hydrationCompleteRef.current = true;
+      hydration.markHydrationComplete();
       return;
     }
 
-    const html = document.content ?? '';
-
     try {
-      const xml = typeof (ydoc as any).getXmlFragment === 'function' 
-        ? (ydoc as any).getXmlFragment('prosemirror') 
-        : null;
-      const yjsHasContent = !!xml && typeof (xml as any).toArray === 'function' && (xml as any).toArray().length > 0;
-
-      if (!yjsHasContent) {
-        console.log('💧 [HYDRATION] Starting DB hydration...');
-        // Clear first, then set content without broadcasting to Supabase
-        editor.commands.clearContent(false);
-        if (html) {
-          editor.commands.setContent(html, { emitUpdate: false });
-        }
-        console.log('✅ [HYDRATION] Complete - DB content loaded into Yjs');
+      console.log('💧 [HYDRATION] Starting DB hydration for:', documentId);
+      editor.commands.clearContent(false);
+      if (html) {
+        editor.commands.setContent(html, { emitUpdate: false });
       }
+      lastHydratedDocumentRef.current = { docId: documentId, html };
+      console.log('✅ [HYDRATION] Complete - DB content loaded into Yjs');
     } catch (e) {
       console.error('Failed to hydrate document:', e);
     } finally {
@@ -775,6 +774,9 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
     }
     hydration.reset();
     hydrationCompleteRef.current = false;
+    lastHydratedDocumentRef.current = { docId: null, html: null };
+    setDocument(null);
+    setTitle('');
 
     let isCancelled = false;
     const abortController = new AbortController();
