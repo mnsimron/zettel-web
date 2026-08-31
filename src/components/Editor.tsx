@@ -91,54 +91,43 @@ function DocumentEditor({ documentId, onSelectDocument, currentUser }: EditorPro
   const ydoc = useMemo(() => {
     const nextDoc = new Y.Doc();
     (nextDoc as any).guid = `doc:${documentId}`;
+    ydocRef.current = nextDoc;
     return nextDoc;
   }, [documentId]);
 
-  useEffect(() => {
-    const previousDoc = ydocRef.current;
-    const previousAwareness = awarenessRef.current;
-    if (previousDoc && previousDoc !== ydoc) {
-      try {
-        previousAwareness?.destroy();
-      } catch {
-        // ignore
-      }
-      try {
-        previousDoc.destroy();
-      } catch {
-        // ignore
-      }
-    }
-
-    ydocRef.current = ydoc;
+  const awareness = useMemo(() => {
     const nextAwareness = new Awareness(ydoc);
     awarenessRef.current = nextAwareness;
+    return nextAwareness;
+  }, [ydoc]);
 
+  useEffect(() => {
     return () => {
       try {
-        nextAwareness.setLocalState(null);
+        awarenessRef.current?.setLocalState(null);
       } catch {
         // ignore
       }
       try {
-        nextAwareness.destroy();
+        awarenessRef.current?.destroy();
       } catch {
         // ignore
       }
       try {
-        ydoc.destroy();
+        ydocRef.current?.destroy();
       } catch {
         // ignore
       }
+      awarenessRef.current = null;
       ydocRef.current = null;
     };
-  }, [ydoc]);
+  }, [ydoc, awareness]);
 
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
       Collaboration.configure({ document: ydoc }),
-      CollaborationCaret.configure({ provider: { awareness: awarenessRef.current ?? undefined } }),
+      CollaborationCaret.configure({ provider: { awareness } }),
       (StarterKit.configure as any)({ history: false }),
       TextStyle,
       Color.configure({ types: ['textStyle'] }),
@@ -188,6 +177,17 @@ function DocumentEditor({ documentId, onSelectDocument, currentUser }: EditorPro
 
   useEffect(() => {
     editorRef.current = editor;
+
+    return () => {
+      try {
+        if (editorRef.current) {
+          editorRef.current.destroy();
+          editorRef.current = null;
+        }
+      } catch {
+        // ignore
+      }
+    };
   }, [editor]);
 
   useEffect(() => {
