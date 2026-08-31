@@ -144,6 +144,17 @@ function FloatingToolbarButton({
 }
 
 export default function Editor({ documentId, onSelectDocument, currentUser }: EditorProps) {
+  return (
+    <DocumentEditor
+      key={documentId}
+      documentId={documentId}
+      onSelectDocument={onSelectDocument}
+      currentUser={currentUser}
+    />
+  );
+}
+
+function DocumentEditor({ documentId, onSelectDocument, currentUser }: EditorProps) {
   const [document, setDocument] = useState<DocRow | null>(null);
   const [documents, setDocuments] = useState<AccessibleDoc[]>([]);
   const [title, setTitle] = useState('');
@@ -169,9 +180,63 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
   const hydration = useYjsHydration({ documentId });
   const hydrationCompleteRef = useRef(false);
   const lastHydratedDocumentRef = useRef<{ docId: string | null; html: string | null }>({ docId: null, html: null });
-  // Create a fresh Yjs document and awareness whenever the documentId changes.
-  const ydoc = useMemo(() => new Y.Doc(), [documentId]);
-  const awareness = useMemo(() => new Awareness(ydoc), [ydoc]);
+  const previousDocumentIdRef = useRef<string | null>(null);
+  const ydocRef = useRef<Y.Doc | null>(null);
+  const awarenessRef = useRef<Awareness | null>(null);
+
+  useEffect(() => {
+    if (
+      previousDocumentIdRef.current &&
+      previousDocumentIdRef.current !== documentId &&
+      ydocRef.current
+    ) {
+      console.log('💥 [DOC_SWITCH] Destroying stale Y.Doc/Awareness before loading the next document', {
+        previousDocumentId: previousDocumentIdRef.current,
+        nextDocumentId: documentId,
+      });
+      try {
+        awarenessRef.current?.destroy();
+      } catch (e) {
+        console.warn('[DOC_SWITCH] Failed to destroy stale awareness', e);
+      }
+      try {
+        ydocRef.current.destroy();
+      } catch (e) {
+        console.warn('[DOC_SWITCH] Failed to destroy stale ydoc', e);
+      }
+      awarenessRef.current = null;
+      ydocRef.current = null;
+      lastHydratedDocumentRef.current = { docId: null, html: null };
+      hydration.reset();
+      hydrationCompleteRef.current = false;
+    }
+
+    previousDocumentIdRef.current = documentId;
+  }, [documentId, hydration]);
+
+  const ydoc = useMemo(() => {
+    if (!ydocRef.current) {
+      ydocRef.current = new Y.Doc();
+    }
+    return ydocRef.current;
+  }, [documentId]);
+
+  const awareness = useMemo(() => {
+    if (awarenessRef.current && awarenessRef.current.doc === ydoc) {
+      return awarenessRef.current;
+    }
+
+    if (awarenessRef.current) {
+      try {
+        awarenessRef.current.destroy();
+      } catch (e) {
+        console.warn('[DOC_SWITCH] Failed to destroy stale awareness instance', e);
+      }
+    }
+
+    awarenessRef.current = new Awareness(ydoc);
+    return awarenessRef.current;
+  }, [ydoc]);
   // Dynamically load TipTap menu components to avoid duplicate runtime registration
   const [Menus, setMenus] = useState<{ FloatingMenu?: any; BubbleMenu?: any } | null>(null);
 
@@ -182,7 +247,7 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       .catch((err) => console.error('Failed to load TipTap menus dynamically', err));
   }, []);
 
-  // Destroy Y.Doc and Awareness when component unmounts to prevent memory leaks
+  // Destroy Y.Doc and Awareness when the editor unmounts or a document switch starts.
   useEffect(() => {
     return () => {
       console.log('💥 [TEARDOWN] Destroying Y.Doc and Awareness for:', documentId);
@@ -193,13 +258,19 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
       hydration.reset();
       hydrationCompleteRef.current = false;
       try {
-        awareness.destroy();
-        ydoc.destroy();
+        awarenessRef.current?.destroy();
       } catch (e) {
-        console.error('Failed to destroy Y.Doc/Awareness', e);
+        console.error('Failed to destroy awareness on teardown', e);
       }
+      try {
+        ydocRef.current?.destroy();
+      } catch (e) {
+        console.error('Failed to destroy Y.Doc on teardown', e);
+      }
+      awarenessRef.current = null;
+      ydocRef.current = null;
     };
-  }, [ydoc, awareness, documentId, hydration]);
+  }, [documentId, hydration]);
 
   // Stable provider object used by CollaborationCaret. Keep fields updated
   // to avoid the extension reading `provider.doc` when it's undefined.
@@ -720,8 +791,17 @@ export default function Editor({ documentId, onSelectDocument, currentUser }: Ed
 
     try {
       console.log('💧 [HYDRATION] Starting DB hydration for:', documentId);
-      editor.commands.clearContent(false);
+      editor.commands.setContent('', { emitUpdate: false });
       if (html) {
+        editor.commands.setContent(html, { emitUpdate: false });
+      }
+      const currentHtml = editor.getHTML();
+      if (currentHtml !== html && html) {
+        console.warn('[HYDRATION] Replacement mismatch; re-applying final DB HTML', {
+          documentId,
+          currentHtmlLength: currentHtml.length,
+          expectedHtmlLength: html.length,
+        });
         editor.commands.setContent(html, { emitUpdate: false });
       }
       lastHydratedDocumentRef.current = { docId: documentId, html };
